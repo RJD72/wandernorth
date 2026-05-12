@@ -1,0 +1,398 @@
+import { useRouter } from "expo-router";
+import { useState } from "react";
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+} from "react-native";
+import * as Location from "expo-location";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+
+import AnimatedIcon from "../components/AnimatedIcon";
+import AutocompleteInput from "../components/AutoCompleteInput";
+import MapComponent from "../components/MapComponent";
+import WNTransportSelector from "../components/WNTransportSelector";
+import { formatDuration } from "../utils/formatDuration";
+import WNButton from "../components/WNButton";
+import StopCountDropdown from "../components/StopCountDropdown";
+import POITypeSelector from "../components/POITypeSelector";
+import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
+
+const TRANSPORT_MODES = [
+  { key: "driving", icon: "car", fallbackLabel: "Car" },
+  { key: "bicycling", icon: "bike", fallbackLabel: "Bike" },
+  { key: "walking", icon: "walk", fallbackLabel: "Walk" },
+  { key: "transit", icon: "train", fallbackLabel: "Transit" },
+];
+
+const buildTransportOptions = (routesByMode) =>
+  TRANSPORT_MODES.map((mode) => {
+    const route = routesByMode[mode.key];
+    const hasRoute = route?.coords?.length > 0;
+
+    return {
+      key: mode.key,
+      icon: mode.icon,
+      label: route ? formatDuration(route.durationSeconds) : mode.fallbackLabel,
+      disabled: route ? !hasRoute : false,
+    };
+  });
+
+const Navigate = () => {
+  const {
+    startingAddress,
+    destinationAddress,
+    startingCoords,
+    destinationCoords,
+    selectedTravelMode,
+    numStops,
+    selectedPoiTypes,
+
+    setStartingAddress,
+    setDestinationAddress,
+    setStartingCoords,
+    setDestinationCoords,
+    setSelectedTravelMode,
+    setNumStops,
+    setSelectedPoiTypes,
+    resetRoutePlanner,
+  } = useRoutePlannerStore();
+
+  const [useCurrentLocation, setUseCurrentLocation] = useState(false);
+  const [travelRadius, setTravelRadius] = useState(5); // Default radius in kilometers
+
+  const [locating, setLocating] = useState(false); // Default locating state
+  const [resetSignal, setResetSignal] = useState(false); // Default reset signal
+
+  const [routesByMode, setRoutesByMode] = useState({});
+
+  const router = useRouter();
+
+  const gpsScale = useSharedValue(1);
+  const gpsGlow = useSharedValue(0);
+
+  const gpsBadgeOpacity = useSharedValue(0);
+  const gpsBadgeTranslate = useSharedValue(-10);
+
+  const options = buildTransportOptions(routesByMode);
+
+  // Attempts to get the user's current location and set it as the starting address
+  const getCurrentLocation = async () => {
+    try {
+      // Set loading state to indicate location retrieval is in progress
+      setLocating(true);
+      setStartingAddress("Locating...");
+
+      // Request permission from the user to access their foreground location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      // Check if the user denied location permission
+      if (status !== "granted") {
+        alert(
+          "Location permission denied. Please allow location access to use this feature.",
+        );
+        return false;
+      }
+
+      // Retrieve the user's current GPS coordinates
+      const position = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = position.coords;
+
+      // Convert GPS coordinates to a human-readable address using reverse geocoding
+      const geo = await Location.reverseGeocodeAsync({ latitude, longitude });
+
+      // Check if reverse geocoding returned valid results
+      if (geo.length > 0) {
+        // Extract city/region information, with fallback options for missing data
+        const city =
+          geo[0].city ||
+          geo[0].subregion ||
+          geo[0].region ||
+          "Current Location";
+        const region = geo[0].region || "";
+
+        // Update state with the formatted address and coordinates
+        setStartingAddress(`${city}, ${region}`);
+        setStartingCoords({ latitude, longitude });
+
+        setLocating(false);
+        return true;
+      }
+    } catch (error) {
+      // Handle any errors that occur during location retrieval
+      console.error("Error obtaining location:", error);
+      alert("An error occurred while trying to get your location.");
+      setLocating(false);
+      return false;
+    }
+  };
+
+  // Converts a human-readable address string into GPS coordinates using geocoding
+  // This allows users to input addresses that are then translated to latitude/longitude
+  const geocodeAddress = async (address) => {
+    // Return early if no address is provided to avoid unnecessary API calls
+    if (!address) return;
+
+    try {
+      // Use expo-location's geocodeAsync to convert the address string to coordinates
+      const res = await Location.geocodeAsync(address);
+
+      // Check if the geocoding returned at least one valid result
+      if (res.length > 0) {
+        // Extract and return the latitude and longitude from the first result
+        return { latitude: res[0].latitude, longitude: res[0].longitude };
+      }
+    } catch (error) {
+      // Log the error to the console for debugging purposes
+      console.error("Error geocoding address:", error);
+
+      // Alert the user that something went wrong during the geocoding process
+      alert("An error occurred while trying to geocode the address.");
+
+      // Return false to indicate the geocoding operation failed
+      return false;
+    }
+  };
+
+  // Handles the route-finding process by validating addresses and navigating to the route screen
+  const handleFindRoute = async () => {
+    // Initialize local variables to store starting and destination coordinates
+    let finalStartCoords = startingCoords;
+    let finalDestCoords = destinationCoords;
+
+    // If the user is not using their current location, geocode the starting address
+    if (!useCurrentLocation) {
+      // Convert the starting address string to GPS coordinates
+      finalStartCoords = await geocodeAddress(startingAddress);
+
+      // Validate that geocoding was successful
+      if (!finalStartCoords) {
+        alert(
+          "Unable to find starting location. Please check the address and try again.",
+        );
+        return;
+      }
+
+      // Update state with the geocoded starting coordinates
+      setStartingCoords(finalStartCoords);
+    }
+
+    // Geocode the destination address to get its coordinates
+    finalDestCoords = await geocodeAddress(destinationAddress);
+
+    // Validate that the destination geocoding was successful
+    if (!finalDestCoords) {
+      alert(
+        "Unable to find destination location. Please check the address and try again.",
+      );
+      return;
+    }
+
+    // Update state with the geocoded destination coordinates
+    setDestinationCoords(finalDestCoords);
+
+    if (
+      typeof finalStartCoords?.latitude !== "number" ||
+      typeof finalStartCoords.longitude !== "number"
+    ) {
+      alert(
+        "Invalid starting coordinates. Please check the address and try again.",
+      );
+      return;
+    }
+
+    if (
+      typeof finalDestCoords?.latitude !== "number" ||
+      typeof finalDestCoords.longitude !== "number"
+    ) {
+      alert(
+        "Invalid destination coordinates. Please check the address and try again.",
+      );
+      return;
+    }
+
+    // Navigate to the route screen with all necessary parameters
+    router.push({
+      pathname: "/(screens)/route",
+      params: {
+        returnTo: "/(tabs)/navigate", // Pass the current screen as the returnTo parameter so the route screen knows where to navigate back to when the user hits "Back"
+      },
+    });
+  };
+
+  const handleReset = () => {
+    resetRoutePlanner();
+    setUseCurrentLocation(false);
+    setTravelRadius(5);
+
+    setRoutesByMode({});
+    setResetSignal((prev) => !prev);
+  };
+
+  // Animated styles for the GPS badge that appears when using current location
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: gpsScale.value }],
+  }));
+
+  // Animated styles for the glow effect around the GPS badge when active
+  const glowStyle = useAnimatedStyle(() => ({
+    backgroundColor: `rgba(255,255,255, ${gpsGlow.value})`,
+  }));
+
+  return (
+    <ScrollView className="bg-background flex-1">
+      <View className="mt-4 px-2">
+        {/* Starting Address */}
+        <AutocompleteInput
+          label="Starting Address"
+          value={startingAddress}
+          placeholder="Search a city, address, or landmark"
+          editable={!useCurrentLocation}
+          rightElement={
+            useCurrentLocation ? (
+              <ActivityIndicator size="small" color="#0000ff" />
+            ) : null
+          }
+          onChangeText={(text) => {
+            setStartingAddress(text);
+            setStartingCoords(null); // Clear coordinates when user types a new address
+            setUseCurrentLocation(false); // Disable current location if user starts typing
+
+            gpsBadgeOpacity.value = withTiming(0, { duration: 300 });
+            gpsBadgeTranslate.value = withTiming(-10, { duration: 300 });
+          }}
+          onSelectLocation={(address, coords) => {
+            setStartingAddress(address);
+            setStartingCoords(coords);
+            setUseCurrentLocation(false); // Ensure current location is disabled when a location is selected from autocomplete
+          }}
+        />
+
+        <Animated.View
+          style={[pulseStyle, glowStyle]}
+          className="flex-row items-center justify-between  mb-3 px-2 "
+        >
+          <View className="flex-row items-center">
+            <Text className={` text-text-primary`}>
+              {useCurrentLocation
+                ? "Using current location"
+                : "Use current location"}
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={async () => {
+              // If already using → turn OFF
+              if (useCurrentLocation) {
+                setUseCurrentLocation(false);
+                setStartingAddress("");
+                setStartingCoords(null);
+
+                gpsBadgeOpacity.value = withTiming(0, { duration: 200 });
+                gpsBadgeTranslate.value = withTiming(-10, { duration: 200 });
+
+                gpsGlow.value = withTiming(0, { duration: 200 });
+                return;
+              }
+
+              // If not using → turn ON
+              setLocating(true);
+              setStartingAddress("Getting your location...");
+
+              const ok = await getCurrentLocation();
+              setLocating(false);
+
+              if (ok) {
+                setUseCurrentLocation(true);
+
+                gpsBadgeOpacity.value = withTiming(1, { duration: 250 });
+                gpsBadgeTranslate.value = withTiming(0, { duration: 250 });
+
+                // Pulse
+                gpsScale.value = 1.1;
+                gpsScale.value = withTiming(1, { duration: 200 });
+
+                // Glow in
+                gpsGlow.value = withTiming(0.15, { duration: 250 });
+              }
+            }}
+          >
+            {locating ? (
+              <ActivityIndicator size="small" color="#1D3B2A" />
+            ) : (
+              <AnimatedIcon useCurrentLocation={useCurrentLocation} />
+            )}
+          </Pressable>
+        </Animated.View>
+
+        {/* Destination */}
+
+        <AutocompleteInput
+          label="Destination"
+          value={destinationAddress}
+          placeholder="Search a city, address, or landmark"
+          onChangeText={(text) => {
+            setDestinationAddress(text);
+            setDestinationCoords(null); // Clear coordinates when user types a new address
+          }}
+          onSelectLocation={(address, coords) => {
+            setDestinationAddress(address);
+            setDestinationCoords(coords);
+          }}
+        />
+
+        <WNTransportSelector
+          value={selectedTravelMode}
+          onChange={setSelectedTravelMode}
+          options={options}
+        />
+      </View>
+      <View className="px-2  w-full h-[480px]">
+        <MapComponent
+          startCoords={startingCoords} // startingCoords is either set by geocoding the user's input address or by using the device's current location if the user opts for that. It's passed to MapComponent to center the map and potentially as the starting point for route calculations.
+          destCoords={destinationCoords} // destinationCoords is set by geocoding the user's input for the destination address. It's passed to MapComponent to show the destination on the map and as the endpoint for route calculations.
+          useCurrentLocation={useCurrentLocation} // This boolean state indicates whether the user has chosen to use their current location as the starting point. It's passed to MapComponent so it can adjust its behavior accordingly, such as centering the map on the user's location and updating in real-time if the location changes.
+          travelRadius={travelRadius * 1000} // Convert km to meters
+          resetSignal={resetSignal} // This is a boolean that toggles between true and false whenever the user hits the "Reset Inputs" button. It's passed to MapComponent so that it can listen for changes to this prop and reset its internal state (like clearing routes and markers) whenever it detects a change, effectively acting as a signal to clear the map.
+          mapMarkers={[]} // This is an array of marker objects that MapComponent can use to display points of interest or other relevant locations on the map. It's currently an empty array, but in a more complete implementation, this could be populated based on user input, route calculations, or selected POI types.
+          selectedTravelMode={selectedTravelMode} // This state holds the currently selected mode of transportation (e.g., "driving", "bicycling", "walking", "transit"). It's passed to MapComponent so that it can calculate and display routes according to the selected mode, as different modes may have different route options and durations.
+          onRoutesByModeChange={setRoutesByMode} // This is a callback function that MapComponent can call whenever it has new route information categorized by transportation mode. By passing setRoutesByMode directly, we're allowing MapComponent to update the routesByMode state in the parent component (Navigate) whenever it calculates new routes, ensuring that the latest route information is available for display and for building the transport options with accurate durations.
+          onSelectedTravelModeChange={setSelectedTravelMode} // This callback allows MapComponent to update the selectedTravelMode state in the parent component whenever the user selects a different mode of transportation within the map interface (e.g., by tapping on a route option). This keeps the selected travel mode in sync between the map and the transport selector UI.
+        />
+      </View>
+      <View className="px-2 mt-4">
+        <POITypeSelector
+          selectedPoiTypes={selectedPoiTypes} // Pass the current array of selected POI type ids to the selector component
+          onChange={setSelectedPoiTypes} // Pass the state setter directly to the selector component so it can update the selected types when chips are toggled
+        />
+      </View>
+
+      <View className="px-2">
+        <StopCountDropdown
+          value={numStops} // Controlled value from the numStops state
+          onChange={setNumStops} // Update numStops when the user selects a new count
+        />
+      </View>
+      <View className="px-2 mt-8 gap-4">
+        <WNButton
+          label="Find My Route"
+          onPress={handleFindRoute}
+          variant="primary"
+        />
+
+        <WNButton
+          label="Reset Inputs"
+          onPress={handleReset}
+          variant="secondary"
+        />
+      </View>
+    </ScrollView>
+  );
+};
+export default Navigate;
