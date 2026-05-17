@@ -31,7 +31,6 @@ const POI_TYPES = [
   { id: "museum", label: "Museum", icon: "bank" },
   { id: "tourist_attraction", label: "Tourist Attraction", icon: "map-marker" },
   { id: "gas_station", label: "Gas Station", icon: "gas-station" },
-  { id: "scenic", label: "Scenic", icon: "image-filter-hdr" },
 ];
 
 /**
@@ -76,6 +75,7 @@ export default function POITypeSelector({
       return "Any type of stop";
     }
 
+    // Map selected ids to their labels using the POI_TYPES array.
     const selectedLabels = POI_TYPES.filter((poiType) =>
       selectedPoiTypes.includes(poiType.id),
     ).map((poiType) => poiType.label);

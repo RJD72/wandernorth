@@ -46,6 +46,13 @@ module.exports = {
       // Changing this after publishing creates a new app identity in Play Store.
       package: "com.rob.wandernorth",
 
+      config: {
+        // Google Maps API key for Android builds (read from environment variable).
+        googleMaps: {
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+        },
+      },
+
       adaptiveIcon: {
         // Background color behind adaptive icon foreground asset.
         backgroundColor: "#E6F4FE",

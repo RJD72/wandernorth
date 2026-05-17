@@ -22,14 +22,38 @@ const GOOGLE_PLACES_NEARBY_URL =
  * Keep this simple at first.
  */
 const GOOGLE_PLACE_TYPE_MAP = {
-  cafe: "cafe",
-  restaurant: "restaurant",
-  bar: "bar",
-  attraction: "tourist_attraction",
-  park: "park",
-  museum: "museum",
-  lodging: "lodging",
-  gas: "gas_station",
+  "cafe": "cafe",
+  "coffee": "cafe",
+  "coffee_shop": "cafe",
+
+  "restaurant": "restaurant",
+  "restaurants": "restaurant",
+  "food": "restaurant",
+
+  "bar": "bar",
+  "bars": "bar",
+
+  "attraction": "tourist_attraction",
+  "attractions": "tourist_attraction",
+  "tourist_attraction": "tourist_attraction",
+
+  "park": "park",
+  "parks": "park",
+
+  "museum": "museum",
+  "museums": "museum",
+
+  "lodging": "lodging",
+  "hotel": "lodging",
+  "hotels": "lodging",
+  "motel": "lodging",
+  "motels": "lodging",
+
+  "gas": "gas_station",
+  "gas_station": "gas_station",
+  "gas_stations": "gas_station",
+  "gas station": "gas_station",
+  "fuel": "gas_station",
 };
 
 /**
@@ -38,6 +62,10 @@ const GOOGLE_PLACE_TYPE_MAP = {
  * Keep this conservative so you don't burn API calls or return chaos.
  */
 const DEFAULT_GOOGLE_TYPES = ["cafe", "restaurant", "tourist_attraction"];
+
+// Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
+const MAX_ROUTE_POINTS_TO_SEARCH = 3;
+const MAX_POI_TYPES_TO_SEARCH = 2;
 
 /**
  * Converts app POI type ids into Google Places API types.
@@ -63,7 +91,7 @@ function getGooglePlaceTypes(selectedPoiTypes = []) {
   }
 
   const mappedTypes = selectedPoiTypes
-    .map((type) => GOOGLE_PLACE_TYPE_MAP[type])
+    .map((type) => GOOGLE_PLACE_TYPE_MAP[String(type).trim().toLowerCase()])
     .filter(Boolean);
 
   return mappedTypes.length > 0 ? mappedTypes : DEFAULT_GOOGLE_TYPES;
@@ -248,7 +276,34 @@ export async function fetchPoisNearRoutePoints({
     return [];
   }
 
+  /**
+   * Convert numStops into a safe number.
+   *
+   * Important:
+   * Number(numStops) || 3 is a bug because 0 || 3 becomes 3.
+   * If the user chooses 0 stops, we want to respect that and return no POIs.
+   */
+  const parsedNumStops = Number(numStops);
+
+  const safeNumStops = Number.isFinite(parsedNumStops)
+    ? Math.max(0, parsedNumStops)
+    : 3;
+
+  // If the user chose zero stops, do not make any POI API calls.
+  // This saves quota and avoids returning stops the user did not ask for.
+  if (safeNumStops === 0) {
+    return [];
+  }
+
   const googleTypes = getGooglePlaceTypes(selectedPoiTypes);
+
+  if (googleTypes.length === 0) {
+    console.log(
+      "[poiService] No valid Google POI types found for:",
+      selectedPoiTypes,
+    );
+    return [];
+  }
 
   /**
    * Temporary safety guard:
@@ -258,8 +313,8 @@ export async function fetchPoisNearRoutePoints({
    * 3 route points × 2 types = 6 API calls.
    * That is enough for testing without going wild.
    */
-  const pointsToSearch = routePoints.slice(0, 3);
-  const typesToSearch = googleTypes.slice(0, 2);
+  const pointsToSearch = routePoints.slice(0, MAX_ROUTE_POINTS_TO_SEARCH);
+  const typesToSearch = googleTypes.slice(0, MAX_POI_TYPES_TO_SEARCH);
 
   // Build all request promises first so they can execute in parallel.
   const requests = [];
@@ -295,5 +350,5 @@ export async function fetchPoisNearRoutePoints({
    * For now, return the first N.
    * Later, this is where route-position scoring and quality scoring will go.
    */
-  return dedupedPois.slice(0, Number(numStops) || 3);
+  return dedupedPois.slice(0, safeNumStops);
 }

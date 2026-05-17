@@ -4,9 +4,7 @@ function getGoogleApiKey() {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   if (!apiKey) {
-    throw new Error(
-      "Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY. Add it to your .env file.",
-    );
+    throw new Error("Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY.");
   }
 
   return apiKey;
@@ -17,21 +15,20 @@ function getGooglePlaceId(stop) {
 
   return (
     stop.googlePlaceId ??
-    stop.id ??
+    stop.placeId ??
     stop.place_id ??
-    stop.fsq_id ??
-    stop.properties?.place_id ??
-    stop.properties?.id ??
+    stop.properties?.googlePlaceId ??
+    stop.properties?.placeId ??
     null
   );
 }
 
-function buildPhotoUrl(photoName, maxWidth = 800) {
+function buildPhotoUrl(photoName, maxWidthPx = 900) {
   if (!photoName) return null;
 
   const apiKey = getGoogleApiKey();
 
-  return `${GOOGLE_PLACES_BASE_URL}/${photoName}/media?maxWidthPx=${maxWidth}&key=${apiKey}`;
+  return `${GOOGLE_PLACES_BASE_URL}/${photoName}/media?maxWidthPx=${maxWidthPx}&key=${apiKey}`;
 }
 
 export async function fetchGooglePlaceDetailsForStop(stop) {
@@ -40,8 +37,13 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
   if (!placeId) {
     return {
       googlePlaceId: null,
+      title: null,
+      address: null,
       imageUrls: [],
       description: null,
+      rating: null,
+      userRatingCount: null,
+      googleMapsUri: null,
       source: "no-google-place-id",
     };
   }
@@ -53,8 +55,8 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-
-      "X-Goog-FieldMask": "photos,editorialSummary",
+      "X-Goog-FieldMask":
+        "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
     },
   });
 
@@ -62,21 +64,28 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
     const errorText = await response.text();
 
     throw new Error(
-      `Google Places details request failed: ${response.status} ${errorText}`,
+      `Google Place Details failed: ${response.status} ${errorText}`,
     );
   }
 
   const data = await response.json();
 
   const imageUrls =
-    data.photos?.slice(0, 3).map((photo) => buildPhotoUrl(photo.name)) ?? [];
+    data.photos
+      ?.slice(0, 5)
+      .map((photo) => buildPhotoUrl(photo.name))
+      .filter(Boolean) ?? [];
 
   return {
     googlePlaceId: data.id ?? placeId,
     title: data.displayName?.text ?? null,
+    address: data.formattedAddress ?? null,
     imageUrls,
     description: data.editorialSummary?.text ?? null,
-    raw: data,
+    rating: data.rating ?? null,
+    userRatingCount: data.userRatingCount ?? null,
+    googleMapsUri: data.googleMapsUri ?? null,
     source: "google-place-details",
+    raw: data,
   };
 }

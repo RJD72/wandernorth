@@ -109,6 +109,37 @@ function formatLatLng(coords) {
   return `${coords.latitude},${coords.longitude}`;
 }
 
+function getMarkerCoords(marker) {
+  if (!marker) return null;
+
+  const latitude =
+    marker.latitude ??
+    marker.lat ??
+    marker.location?.latitude ??
+    marker.location?.lat;
+
+  const longitude =
+    marker.longitude ??
+    marker.lng ??
+    marker.location?.longitude ??
+    marker.location?.lng;
+
+  const numericLatitude = Number(latitude);
+  const numericLongitude = Number(longitude);
+
+  const hasValidCoords =
+    Number.isFinite(numericLatitude) && Number.isFinite(numericLongitude);
+
+  if (!hasValidCoords) {
+    return null;
+  }
+
+  return {
+    latitude: numericLatitude,
+    longitude: numericLongitude,
+  };
+}
+
 /**
  * MapComponent
  *
@@ -370,14 +401,18 @@ const MapComponent = ({
    * - We don't want to lose other mode data if one request rejects
    */
   useEffect(() => {
+    let isCurrent = true;
+
     const fetchAllRoutes = async () => {
       if (externalRouteCoords?.length > 0) {
+        if (!isCurrent) return;
         setRoutesByMode({});
         setLoading(false);
         return;
       }
 
       if (!startCoords || !destCoords) {
+        if (!isCurrent) return;
         setRoutesByMode({});
         return;
       }
@@ -388,6 +423,8 @@ const MapComponent = ({
         const results = await Promise.allSettled(
           TRAVEL_MODES.map((mode) => fetchRouteForMode(mode.key)),
         );
+
+        if (!isCurrent) return;
 
         const nextRoutesByMode = {};
 
@@ -425,11 +462,18 @@ const MapComponent = ({
       } catch (error) {
         console.log("[MapComponent] Fetch all routes error:", error);
       } finally {
+        if (isCurrent) {
+          setLoading(false);
+        }
         setLoading(false);
       }
     };
 
     fetchAllRoutes();
+
+    return () => {
+      isCurrent = false;
+    };
   }, [startCoords, destCoords, externalRouteCoords]);
 
   // ==================== COMPUTED VALUES ====================
@@ -523,6 +567,20 @@ const MapComponent = ({
     }
   }, [resetSignal, region]);
 
+  useEffect(() => {
+    if (!mapRef.current || !routeCoords?.length) return;
+
+    mapRef.current.fitToCoordinates(routeCoords, {
+      edgePadding: {
+        top: 80,
+        right: 60,
+        bottom: 80,
+        left: 60,
+      },
+      animated: true,
+    });
+  }, [routeCoords]);
+
   const routeStyle = ROUTE_STYLES[selectedTravelMode] ?? ROUTE_STYLES.driving;
 
   // ==================== RENDER ====================
@@ -577,17 +635,26 @@ const MapComponent = ({
             - title: Name shown in popup (optional)
             - description: Details shown in popup (optional)
         */}
-        {mapMarkers.map((m, i) => (
-          <Marker
-            key={m.id || `${m.name || m.title || "marker"}-${i}`}
-            coordinate={{
-              latitude: m.latitude,
-              longitude: m.longitude,
-            }}
-            title={m.title || m.name || "Location"}
-            description={m.description || m.address || m.category || ""}
-          />
-        ))}
+        {mapMarkers.map((marker, index) => {
+          const coords = getMarkerCoords(marker);
+
+          if (!coords) {
+            console.log(
+              "[MapComponent] Skipping marker with invalid coords:",
+              marker,
+            );
+            return null;
+          }
+
+          return (
+            <Marker
+              key={marker.id || marker.googlePlaceId || index}
+              coordinate={coords}
+              title={marker.name || "Stop"}
+              description={marker.address || marker.category || ""}
+            />
+          );
+        })}
 
         {/* ===== TRAVEL RADIUS CIRCLE ===== 
             

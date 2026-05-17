@@ -25,6 +25,26 @@ function getStopId(stop) {
   );
 }
 
+function getStopCoords(stop) {
+  if (!stop) return null;
+
+  const latitude =
+    stop.latitude ?? stop.location?.latitude ?? stop.location?.lat;
+  const longitude =
+    stop.longitude ?? stop.location?.longitude ?? stop.location?.lng;
+
+  if (
+    typeof latitude !== "number" ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
 const Route = () => {
   // Primary route request lifecycle state.
   // - loading controls the initial screen state while route data is being built.
@@ -41,6 +61,10 @@ const Route = () => {
   const [suggestedStops, setSuggestedStops] = useState([]);
 
   const [selectedStops, setSelectedStops] = useState([]);
+
+  const [finalRouteData, setFinalRouteData] = useState(null);
+  const [finalRouteLoading, setFinalRouteLoading] = useState(false);
+  const [finalRouteError, setFinalRouteError] = useState(null);
 
   // Route planning inputs are sourced from a shared Zustand store.
   // This screen assumes those values were collected on previous steps.
@@ -68,6 +92,9 @@ const Route = () => {
 
   function toggleSelectedStop(stop) {
     const stopId = getStopId(stop);
+
+    setFinalRouteData(null);
+    setFinalRouteError(null);
 
     setSelectedStops((currentStops) => {
       const alreadySelected = currentStops.some((currentStop) => {
@@ -201,9 +228,9 @@ const Route = () => {
 
         const pois = await fetchPoisNearRoutePoints({
           // The POI service is designed to accept multiple route points and return a consolidated list of nearby POIs, which is more efficient than making separate calls for each point.
-          routePoints: routeSamplePoints,
-          selectedPoiTypes,
-          numStops,
+          routePoints: routeSamplePoints, // Array of numbers representing strategic points along the route for optimized POI searching.
+          selectedPoiTypes, // Array of user-selected POI categories (e.g., ["restaurant", "park"]) that will be mapped to Google Place types within the service.
+          numStops, // The desired number of stops, which can be used by the service to prioritize or limit results. This value is passed as-is and can be a number or numeric string; the service should handle coercion and validation.
         });
 
         if (!isCurrent) return;
@@ -240,6 +267,75 @@ const Route = () => {
       isCurrent = false;
     };
   }, [routeData, selectedPoiTypes, numStops]);
+
+  async function handleBuildFinalRoute() {
+    if (selectedStops.length === 0) {
+      setFinalRouteError(
+        "Choose at least one stop before building the final route.",
+      );
+      return;
+    }
+
+    // Sort selected stops by their position along the original route before
+    // sending them to Google as waypoints.
+    //
+    // Without this, Google receives stops in the order the user tapped them.
+    // Example: Stop 3 → Stop 1 → Stop 2.
+    // That can create a final route that backtracks.
+    const sortedSelectedStops = [...selectedStops].sort((a, b) => {
+      const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
+      const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
+
+      return aProgress - bProgress;
+    });
+
+    // Convert sorted stops into waypoint coordinates for the final route request.
+    const waypointCoords = sortedSelectedStops
+      .map(getStopCoords)
+      .filter(Boolean);
+
+    if (waypointCoords.length !== selectedStops.length) {
+      setFinalRouteError("One or more selected stops is missing coordinates.");
+      return;
+    }
+
+    try {
+      setFinalRouteLoading(true);
+      setFinalRouteError(null);
+
+      const result = await buildGoogleRoute({
+        startingAddress: routeData.parsedParams.startingAddress,
+        destinationAddress: routeData.parsedParams.destinationAddress,
+        startingCoords: routeData.parsedParams.startingCoords,
+        destinationCoords: routeData.parsedParams.destinationCoords,
+        travelMode: routeData.parsedParams.travelMode,
+        selectedPoiTypes: routeData.parsedParams.selectedPoiTypes,
+        numStops: selectedStops.length,
+        waypoints: waypointCoords,
+      });
+
+      const routeCoords = polyline
+        .decode(result.encodedPolyline)
+        .map(([latitude, longitude]) => ({
+          latitude,
+          longitude,
+        }));
+
+      setFinalRouteData({
+        ...result,
+        routeCoords,
+        selectedStops,
+      });
+    } catch (error) {
+      console.log("Final route build error:", error);
+      setFinalRouteError("Failed to build final route with selected stops.");
+    } finally {
+      setFinalRouteLoading(false);
+    }
+  }
+
+  const displayedRouteData = finalRouteData ?? routeData;
+  const mapMarkers = finalRouteData ? selectedStops : visibleSuggestedStops;
 
   // Render branch 1: full-page loader while initial route call runs.
   if (loading) {
@@ -281,8 +377,6 @@ const Route = () => {
   // Main success view: route metrics, map visualization, route summary, and POI section.
   return (
     <ScrollView className="flex-1 bg-background px-2 py-8">
-      <Text className="text-2xl font-bold text-wn-forest">Your Route</Text>
-
       {/* Map panel showing the computed route polyline and any suggested stop markers. */}
       <View className=" h-[480px] w-full overflow-hidden">
         <MapComponent
@@ -290,9 +384,9 @@ const Route = () => {
           destCoords={finalDestinationCoords}
           useCurrentLocation={false}
           travelRadius={0}
-          mapMarkers={suggestedStops}
+          mapMarkers={mapMarkers}
           selectedTravelMode={finalTravelMode}
-          routeCoords={routeData.routeCoords}
+          routeCoords={displayedRouteData.routeCoords}
         />
       </View>
 
@@ -302,8 +396,8 @@ const Route = () => {
           startingAddress={routeData.parsedParams.startingAddress}
           destinationAddress={routeData.parsedParams.destinationAddress}
           travelMode={routeData.parsedParams.travelMode}
-          distanceText={routeData.distanceText}
-          durationText={routeData.durationText}
+          distanceText={displayedRouteData.distanceText}
+          durationText={displayedRouteData.durationText}
           numStops={routeData.parsedParams.numStops}
           stopCount={suggestedStops.length}
           selectedStopCount={selectedStops.length}
@@ -328,15 +422,24 @@ const Route = () => {
       <View className="mt-4 mb-2">
         <WNButton label="Edit Route" onPress={() => router.back()} />
       </View>
-      <View className="mt-4 mb-10">
-        <WNButton
-          label="Build Final Route"
-          onPress={() => {
-            console.log("Selected stops for final route:", selectedStops);
-          }}
-          disabled={selectedStops.length === 0}
-        />
-      </View>
+
+      {selectedStops.length > 0 && (
+        <View className="mt-4 mb-10">
+          <WNButton
+            label={
+              finalRouteLoading
+                ? "Building Final Route..."
+                : "Build Final Route"
+            }
+            onPress={handleBuildFinalRoute}
+            disabled={finalRouteLoading}
+          />
+
+          {finalRouteError && (
+            <Text className="mt-2 text-sm text-red-600">{finalRouteError}</Text>
+          )}
+        </View>
+      )}
     </ScrollView>
   );
 };

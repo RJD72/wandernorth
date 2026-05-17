@@ -97,6 +97,8 @@ const Navigate = () => {
         alert(
           "Location permission denied. Please allow location access to use this feature.",
         );
+        setStartingAddress("");
+        setLocating(false);
         return false;
       }
 
@@ -128,6 +130,8 @@ const Navigate = () => {
       // Handle any errors that occur during location retrieval
       console.error("Error obtaining location:", error);
       alert("An error occurred while trying to get your location.");
+      setStartingAddress("");
+      setStartingCoords(null);
       setLocating(false);
       return false;
     }
@@ -167,7 +171,7 @@ const Navigate = () => {
     let finalDestCoords = destinationCoords;
 
     // If the user is not using their current location, geocode the starting address
-    if (!useCurrentLocation) {
+    if (!finalStartCoords) {
       // Convert the starting address string to GPS coordinates
       finalStartCoords = await geocodeAddress(startingAddress);
 
@@ -184,7 +188,9 @@ const Navigate = () => {
     }
 
     // Geocode the destination address to get its coordinates
-    finalDestCoords = await geocodeAddress(destinationAddress);
+    if (!finalDestCoords) {
+      finalDestCoords = await geocodeAddress(destinationAddress);
+    }
 
     // Validate that the destination geocoding was successful
     if (!finalDestCoords) {

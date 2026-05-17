@@ -65,6 +65,7 @@ export async function buildGoogleRoute({
   startingCoords,
   destinationCoords,
   travelMode,
+  waypoints = [], // Optional array of intermediate waypoints (not currently used)
 }) {
   // Google Routes API v2 endpoint — all requests are POST with a JSON body
   const url = `https://routes.googleapis.com/directions/v2:computeRoutes`;
@@ -91,6 +92,15 @@ export async function buildGoogleRoute({
         },
       },
     },
+
+    intermediates: waypoints.map((point) => ({
+      location: {
+        latLng: {
+          latitude: point.latitude,
+          longitude: point.longitude,
+        },
+      },
+    })),
 
     // Convert the app's internal mode string to the Google API enum value
     travelMode: convertModeToGoogleMode(travelMode),

@@ -69,14 +69,18 @@ function getStopAddress(stop) {
 function getStopDescription(stop) {
   if (!stop) return "No description available.";
 
-  return (
+  const existingDescription =
     asText(stop.description) ||
     asText(stop.summary) ||
     asText(stop.editorialSummary?.text) ||
-    asText(stop.editorialSummary) ||
-    asText(stop.editorial_summary?.overview) ||
-    "No description available."
-  );
+    asText(stop.editorial_summary?.overview);
+
+  if (existingDescription) return existingDescription;
+
+  const title = getStopTitle(stop);
+  const category = getStopCategory(stop);
+
+  return `${title} is a suggested ${category} near your route. Google does not provide a description for this stop.`;
 }
 
 function getStopImage(stop) {
@@ -213,11 +217,22 @@ const SuggestedStopsList = ({
   const activeStopIsSelected = activeStop ? isStopSelected(activeStop) : false;
 
   const modalTitle = activeStopDetails?.title ?? getStopTitle(activeStop);
+
   const modalAddress = activeStopDetails?.address ?? getStopAddress(activeStop);
+
   const modalDescription =
     activeStopDetails?.description ?? getStopDescription(activeStop);
+
   const modalImageUrl =
     activeStopDetails?.imageUrls?.[0] ?? getStopImage(activeStop);
+
+  const modalRating = activeStopDetails?.rating ?? activeStop?.rating ?? null;
+
+  const modalUserRatingCount =
+    activeStopDetails?.userRatingCount ?? activeStop?.userRatingCount ?? null;
+
+  const modalGoogleMapsUri =
+    activeStopDetails?.googleMapsUri ?? activeStop?.googleMapsUri ?? null;
 
   return (
     <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -312,7 +327,22 @@ const SuggestedStopsList = ({
           <View className="max-h-[85%] rounded-t-3xl bg-white">
             {activeStop && (
               <ScrollView className="p-5">
-                {modalImageUrl ? (
+                {activeStopDetails?.imageUrls?.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    className="mb-4"
+                  >
+                    {activeStopDetails.imageUrls.map((imageUrl, index) => (
+                      <Image
+                        key={`${imageUrl}-${index}`}
+                        source={{ uri: imageUrl }}
+                        className="mr-3 h-48 w-72 rounded-2xl bg-wn-green-50"
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
+                ) : modalImageUrl ? (
                   <Image
                     source={{ uri: modalImageUrl }}
                     className="h-48 w-full rounded-2xl bg-wn-green-50"
@@ -351,6 +381,15 @@ const SuggestedStopsList = ({
                 <Text className="mt-3 text-base text-wn-text">
                   {modalAddress}
                 </Text>
+
+                {modalRating && (
+                  <Text className="mt-2 text-sm text-wn-text">
+                    Rating: {modalRating} / 5
+                    {modalUserRatingCount
+                      ? ` · ${modalUserRatingCount} reviews`
+                      : ""}
+                  </Text>
+                )}
 
                 <Text className="mt-3 text-base font-semibold text-wn-forest">
                   {getDistanceOffRouteText(activeStop)}
