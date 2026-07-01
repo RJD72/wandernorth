@@ -26,7 +26,6 @@ const POI_TYPES = [
   { id: "cafe", label: "Cafe", icon: "coffee" },
   { id: "bar", label: "Bar", icon: "glass-cocktail" },
   { id: "hotel", label: "Hotel", icon: "bed" },
-  { id: "attraction", label: "Attraction", icon: "star" },
   { id: "park", label: "Park", icon: "tree" },
   { id: "museum", label: "Museum", icon: "bank" },
   { id: "tourist_attraction", label: "Tourist Attraction", icon: "map-marker" },
@@ -128,9 +127,7 @@ export default function POITypeSelector({
   return (
     <View className="w-full">
       {/* Field label */}
-      <Text className="mb-2 text-sm font-semibold text-forest-900">
-        {label}
-      </Text>
+      <Text className="mb-2 text-sm font-semibold text-white">{label}</Text>
 
       {/* Closed dropdown trigger — tapping opens the bottom-sheet modal */}
       <Pressable

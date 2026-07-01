@@ -1,0 +1,201 @@
+ LOG  [poiService
+] Incoming sampled route points: 6
+ LOG  [poiService
+] Points actually searched: 5
+ LOG  [poiService
+] Types actually searched: [
+    "restaurant",
+    "cafe"
+]
+ LOG  [poiService
+] Search request count: 10
+ LOG  [route
+] Nearby POIs by progress: [
+    {
+        "category": "cafe",
+        "closestRouteIndex": 6,
+        "distanceOffRoute": 69.92516059330163,
+        "name": "Smile Tiger Coffee Roasters",
+        "rating": 4.5,
+        "reviews": 2155,
+        "routeProgress": 0.009615384615384616
+    },
+    {
+        "category": "cafe",
+        "closestRouteIndex": 7,
+        "distanceOffRoute": 389.01613538710956,
+        "name": "Holly's Neighbourhood Cafe & Bar",
+        "rating": 4.6,
+        "reviews": 462,
+        "routeProgress": 0.011217948717948718
+    },
+    {
+        "category": "middle_eastern_restaurant",
+        "closestRouteIndex": 11,
+        "distanceOffRoute": 1384.784478816501,
+        "name": "Arabesque Family Restaurant",
+        "rating": 4.5,
+        "reviews": 4606,
+        "routeProgress": 0.017628205128205128
+    },
+    {
+        "category": "coffee_shop",
+        "closestRouteIndex": 12,
+        "distanceOffRoute": 1978.4409342287245,
+        "name": "Starbucks Coffee Company",
+        "rating": 4.1,
+        "reviews": 593,
+        "routeProgress": 0.019230769230769232
+    },
+    {
+        "category": "fast_food_restaurant",
+        "closestRouteIndex": 15,
+        "distanceOffRoute": 2242.172560260753,
+        "name": "McDonald's",
+        "rating": 3.4,
+        "reviews": 2248,
+        "routeProgress": 0.02403846153846154
+    },
+    {
+        "category": "barbecue_restaurant",
+        "closestRouteIndex": 25,
+        "distanceOffRoute": 475.98687221532754,
+        "name": "The Lancaster Smokehouse",
+        "rating": 4.6,
+        "reviews": 6672,
+        "routeProgress": 0.04006410256410257
+    },
+    {
+        "category": "steak_house",
+        "closestRouteIndex": 25,
+        "distanceOffRoute": 576.4989519271229,
+        "name": "Golf's Steak House & Seafood",
+        "rating": 4.5,
+        "reviews": 3278,
+        "routeProgress": 0.04006410256410257
+    },
+    {
+        "category": "coffee_shop",
+        "closestRouteIndex": 56,
+        "distanceOffRoute": 750.7607067477005,
+        "name": "Tim Hortons",
+        "rating": 3.8,
+        "reviews": 968,
+        "routeProgress": 0.08974358974358974
+    },
+    {
+        "category": "coffee_shop",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 855.5433600654868,
+        "name": "Tim Hortons",
+        "rating": 3.3,
+        "reviews": 1338,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "fast_food_restaurant",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 1177.3028084859025,
+        "name": "McDonald's",
+        "rating": 3.4,
+        "reviews": 1562,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "restaurant",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 661.4458448253599,
+        "name": "Burger King",
+        "rating": 3.2,
+        "reviews": 274,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "breakfast_restaurant",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 728.9467939680267,
+        "name": "Stacked Pancake & Breakfast House",
+        "rating": 4.8,
+        "reviews": 635,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "brewpub",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 1437.564206399497,
+        "name": "Rural Roots Brewing Company",
+        "rating": 4.9,
+        "reviews": 486,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "coffee_shop",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 794.3000820199443,
+        "name": "Starbucks",
+        "rating": 4.3,
+        "reviews": 74,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "coffee_shop",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 59.82220817356315,
+        "name": "Country Style",
+        "rating": null,
+        "reviews": null,
+        "routeProgress": 0.20993589743589744
+    },
+    {
+        "category": "cafe",
+        "closestRouteIndex": 131,
+        "distanceOffRoute": 394.4689907014973,
+        "name": "Copper Pot Coffee",
+        "rating": null,
+        "reviews": null,
+        "routeProgress": 0.20993589743589744
+    }
+]
+ LOG  [route
+] POI candidates: 16
+ LOG  [route
+] Distributed stops: 4
+ LOG  [route
+] Distributed stop scores: [
+    {
+        "category": "cafe",
+        "distanceOffRoute": 69.92516059330163,
+        "name": "Smile Tiger Coffee Roasters",
+        "progress": 0,
+        "rating": 4.5,
+        "reviews": 2155,
+        "score": 95.3
+    },
+    {
+        "category": "barbecue_restaurant",
+        "distanceOffRoute": 475.98687221532754,
+        "name": "The Lancaster Smokehouse",
+        "progress": 0.152,
+        "rating": 4.6,
+        "reviews": 6672,
+        "score": 89.3
+    },
+    {
+        "category": "coffee_shop",
+        "distanceOffRoute": 750.7607067477005,
+        "name": "Tim Hortons",
+        "progress": 0.39999999999999997,
+        "rating": 3.8,
+        "reviews": 968,
+        "score": 79
+    },
+    {
+        "category": "breakfast_restaurant",
+        "distanceOffRoute": 728.9467939680267,
+        "name": "Stacked Pancake & Breakfast House",
+        "progress": 1,
+        "rating": 4.8,
+        "reviews": 635,
+        "score": 85.5
+    }
+]

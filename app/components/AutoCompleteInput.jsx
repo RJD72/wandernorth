@@ -24,6 +24,7 @@ export default function AutocompleteInput({
   placeholder,
   editable = true,
   rightElement = null,
+  onDropdownVisibleChange = () => {}, // Callback to notify parent when dropdown visibility changes
 }) {
   // ============ STATE MANAGEMENT ============
 
@@ -51,6 +52,9 @@ export default function AutocompleteInput({
   const inputRef = useRef(null);
 
   // ============ EFFECTS ============
+  useEffect(() => {
+    onDropdownVisibleChange(showList); // Notify parent whenever dropdown visibility changes
+  }, [showList]);
 
   /**
    * Sync local input state with parent value prop
@@ -243,10 +247,15 @@ export default function AutocompleteInput({
 
       {/* Dropdown suggestions list */}
       {showList && (
-        <View className="absolute left-0 right-0 top-[85%] bg-white border border-forest/20 rounded-xl z-50 shadow-lg ">
+        <View
+          style={{ maxHeight: 240, zIndex: 1003, elevation: 1003 }}
+          className="absolute left-0 right-0 top-[85%] bg-white border border-forest/20 rounded-xl z-50 shadow-lg "
+        >
           <ScrollView
-            style={{ maxHeight: 200 }}
+            nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+            style={{ maxHeight: 200 }}
           >
             {/* Loading indicator */}
             {loading && (

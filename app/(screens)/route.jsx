@@ -6,13 +6,18 @@ import polyline from "@mapbox/polyline";
 import MapComponent from "../components/MapComponent";
 import RouteSummaryCard from "../components/RouteSummaryCard";
 import SuggestedStopsList from "../components/SuggestedStopsList";
-import { buildGoogleRoute } from "../services/googleRoutes";
-import { fetchPoisNearRoutePoints } from "../services/poiService";
-import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
-import { getSamplePointsAlongRoute } from "../utils/routeSampling";
-import { attachRoutePositionToPois } from "../utils/routeDistance";
 import WNButton from "../components/WNButton";
 import SelectedStopsList from "../components/SelectedStopsList";
+import AddCustomStopCard from "../components/AddCustomStopCard";
+
+import { buildGoogleRoute } from "../services/googleRoutes";
+import { fetchPoisNearRoutePoints } from "../services/poiService";
+
+import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
+
+import { getSamplePointsAlongRoute } from "../utils/routeSampling";
+import { attachRoutePositionToPois } from "../utils/routeDistance";
+import { chooseDistributedStops } from "../utils/poiScoring";
 
 function getStopId(stop) {
   return (
@@ -45,6 +50,28 @@ function getStopCoords(stop) {
   return { latitude, longitude };
 }
 
+function formatCategoryTitle(category) {
+  const categoryLabels = {
+    restaurant: "Restaurants",
+    cafe: "Cafes",
+    bar: "Bars",
+    park: "Parks",
+    museum: "Museums",
+    lodging: "Hotels",
+    gas_station: "Gas Stations",
+    tourist_attraction: "Tourist Attractions",
+  };
+
+  if (!category) return "Other Stops";
+
+  return (
+    categoryLabels[category] ??
+    String(category)
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  );
+}
+
 const Route = () => {
   // Primary route request lifecycle state.
   // - loading controls the initial screen state while route data is being built.
@@ -59,6 +86,7 @@ const Route = () => {
   const [poiLoading, setPoiLoading] = useState(false);
   const [poiError, setPoiError] = useState(null);
   const [suggestedStops, setSuggestedStops] = useState([]);
+  const [allRoutePois, setAllRoutePois] = useState([]);
 
   const [selectedStops, setSelectedStops] = useState([]);
 
@@ -111,6 +139,33 @@ const Route = () => {
     });
   }
 
+  function removeAllSelectedStops() {
+    setFinalRouteData(null);
+    setFinalRouteError(null);
+    setSelectedStops([]);
+  }
+
+  function handleAddCustomStop(customStop) {
+    if (!customStop) return;
+
+    if (!routeData?.routeCoords?.length) {
+      setFinalRouteError("Route data is not ready yet. Please try again");
+      return;
+    }
+
+    const [routeAwareCustomStop] = attachRoutePositionToPois(
+      [customStop],
+      routeData.routeCoords,
+    );
+
+    setFinalRouteData(null);
+    setFinalRouteError(null);
+
+    setSelectedStops((currentStops) => {
+      return [...currentStops, routeAwareCustomStop ?? customStop];
+    });
+  }
+
   const visibleSuggestedStops = suggestedStops.filter((stop) => {
     const stopId = getStopId(stop);
 
@@ -118,6 +173,43 @@ const Route = () => {
       return getStopId(selectedStop) === stopId;
     });
   });
+
+  const visibleAllRoutePois = allRoutePois.filter((stop) => {
+    const stopId = getStopId(stop);
+
+    const alreadySelected = selectedStops.some((selectedStop) => {
+      return getStopId(selectedStop) === stopId;
+    });
+
+    const alreadySuggested = suggestedStops.some((suggestedStop) => {
+      return getStopId(suggestedStop) === stopId;
+    });
+
+    return !alreadySelected && !alreadySuggested;
+  });
+
+  const groupedVisibleAllRoutePois = Object.entries(
+    visibleAllRoutePois.reduce((groups, stop) => {
+      const category = stop.category ?? "other";
+
+      if (!groups[category]) {
+        groups[category] = [];
+      }
+      groups[category].push(stop);
+      return groups;
+    }, {}),
+  )
+    .map(([category, stops]) => ({
+      category,
+      title: formatCategoryTitle(category),
+      stops: [...stops].sort((a, b) => {
+        const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 999;
+        const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 999;
+
+        return aProgress - bProgress;
+      }),
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
 
   // Effect 1: Build or rebuild the route whenever inputs change.
   // Responsibility:
@@ -135,6 +227,7 @@ const Route = () => {
         setRouteData(null);
         setSuggestedStops([]);
         setSelectedStops([]);
+        setAllRoutePois([]);
 
         // Guard clause: route computation requires both endpoints.
         // If either is missing, we show a user-friendly error and exit early.
@@ -212,6 +305,7 @@ const Route = () => {
       // Skip POI work until route geometry exists.
       if (!routeData?.routeCoords?.length) {
         setSuggestedStops([]);
+        setAllRoutePois([]);
         setPoiError(null);
         setPoiLoading(false);
         return;
@@ -246,11 +340,54 @@ const Route = () => {
           return poi.closestRouteDistanceMeters <= 3000; // Only include POIs within 3 km of the route.
         });
 
-        const parsedStopCount = Number(numStops);
-        const stopLimit = Number.isFinite(parsedStopCount)
-          ? Math.max(0, parsedStopCount)
-          : 3; // Default to 3 stops if numStops is invalid.
-        setSuggestedStops(nearbyRoutePois.slice(0, stopLimit)); // Take top N stops, defaulting to 3 if numStops is invalid.
+        console.log(
+          "[route] Nearby POIs by progress:",
+          nearbyRoutePois
+            .map((poi) => ({
+              name: poi.name,
+              category: poi.category,
+              routeProgress: poi.routeProgress,
+              closestRouteIndex: poi.closestRouteIndex,
+              distanceOffRoute: poi.closestRouteDistanceMeters,
+              rating: poi.rating,
+              reviews: poi.userRatingCount,
+            }))
+            .sort((a, b) => {
+              const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
+              const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
+              return aProgress - bProgress;
+            }),
+        );
+
+        setAllRoutePois(nearbyRoutePois);
+
+        console.log("[route] All route POIs cached:", nearbyRoutePois.length);
+
+        const distributedStops = chooseDistributedStops(
+          nearbyRoutePois,
+          numStops,
+          {
+            maxDistanceFromRouteMeters: 3000,
+            preferredCategories: selectedPoiTypes,
+          },
+        );
+
+        setSuggestedStops(distributedStops);
+
+        console.log("[route] POI candidates:", nearbyRoutePois.length);
+        console.log("[route] Distributed POIs:", distributedStops.length);
+        console.log(
+          "[route] Distributed POI details:",
+          distributedStops.map((stop) => ({
+            name: stop.name,
+            category: stop.category,
+            distanceOffRoute: stop.closestRouteDistanceMeters,
+            routeProgress: stop.routeProgress,
+            closestRouteIndex: stop.closestRouteIndex,
+            rating: stop.rating,
+            reviews: stop.userRatingCount,
+          })),
+        );
       } catch (error) {
         if (!isCurrent) return;
 
@@ -335,7 +472,7 @@ const Route = () => {
   }
 
   const displayedRouteData = finalRouteData ?? routeData;
-  const mapMarkers = finalRouteData ? selectedStops : visibleSuggestedStops;
+  const mapMarkers = selectedStops;
 
   // Render branch 1: full-page loader while initial route call runs.
   if (loading) {
@@ -376,55 +513,105 @@ const Route = () => {
 
   // Main success view: route metrics, map visualization, route summary, and POI section.
   return (
-    <ScrollView className="flex-1 bg-background px-2 py-8">
-      {/* Map panel showing the computed route polyline and any suggested stop markers. */}
-      <View className=" h-[480px] w-full overflow-hidden">
-        <MapComponent
-          startCoords={finalStartingCoords}
-          destCoords={finalDestinationCoords}
-          useCurrentLocation={false}
-          travelRadius={0}
-          mapMarkers={mapMarkers}
-          selectedTravelMode={finalTravelMode}
-          routeCoords={displayedRouteData.routeCoords}
+    <View className="flex-1 bg-background">
+      <ScrollView
+        className="flex-1 px-2 py-8"
+        contentContainerStyle={{
+          paddingBottom: selectedStops.length > 0 ? 150 : 90,
+        }}
+      >
+        {/* Map panel showing the computed route polyline and any suggested stop markers. */}
+        <View className=" h-[480px] w-full overflow-hidden">
+          <MapComponent
+            startCoords={finalStartingCoords}
+            destCoords={finalDestinationCoords}
+            useCurrentLocation={false}
+            travelRadius={0}
+            mapMarkers={mapMarkers}
+            selectedTravelMode={finalTravelMode}
+            routeCoords={displayedRouteData.routeCoords}
+          />
+        </View>
+
+        {/* RouteSummaryCard repeats key route configuration + output in a compact card. */}
+        <View className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
+          <RouteSummaryCard
+            startingAddress={routeData.parsedParams.startingAddress}
+            destinationAddress={routeData.parsedParams.destinationAddress}
+            travelMode={routeData.parsedParams.travelMode}
+            distanceText={displayedRouteData.distanceText}
+            durationText={displayedRouteData.durationText}
+            numStops={routeData.parsedParams.numStops}
+            stopCount={suggestedStops.length}
+            selectedStopCount={selectedStops.length}
+            selectedPoiTypes={routeData.parsedParams.selectedPoiTypes}
+          />
+        </View>
+
+        <SelectedStopsList
+          selectedStops={selectedStops}
+          onRemoveStop={toggleSelectedStop}
+          onRemoveAllStops={removeAllSelectedStops}
         />
-      </View>
 
-      {/* RouteSummaryCard repeats key route configuration + output in a compact card. */}
-      <View className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
-        <RouteSummaryCard
-          startingAddress={routeData.parsedParams.startingAddress}
-          destinationAddress={routeData.parsedParams.destinationAddress}
-          travelMode={routeData.parsedParams.travelMode}
-          distanceText={displayedRouteData.distanceText}
-          durationText={displayedRouteData.durationText}
-          numStops={routeData.parsedParams.numStops}
-          stopCount={suggestedStops.length}
-          selectedStopCount={selectedStops.length}
-          selectedPoiTypes={routeData.parsedParams.selectedPoiTypes}
+        <AddCustomStopCard onAddStop={handleAddCustomStop} />
+
+        <SuggestedStopsList
+          title="Top Suggestions"
+          emptyMessage="No top suggestions found for this route."
+          allSelectedMessage="All top suggestions have been selected"
+          poiLoading={poiLoading}
+          poiError={poiError}
+          suggestedStops={visibleSuggestedStops}
+          totalSuggestedStopCount={suggestedStops.length}
+          selectedStops={selectedStops}
+          onToggleStop={toggleSelectedStop}
         />
-      </View>
 
-      <SelectedStopsList
-        selectedStops={selectedStops}
-        onRemoveStop={toggleSelectedStop}
-      />
+        <View className="mt-4 px-1">
+          <Text className="text-2xl font-bold text-white">
+            More Stops Along Route
+          </Text>
 
-      <SuggestedStopsList
-        poiLoading={poiLoading}
-        poiError={poiError}
-        suggestedStops={visibleSuggestedStops}
-        totalSuggestedStopCount={suggestedStops.length}
-        selectedStops={selectedStops}
-        onToggleStop={toggleSelectedStop}
-      />
+          <Text className="mt-1 text-sm text-white">
+            Browse additional stops by category.
+          </Text>
+        </View>
 
-      <View className="mt-4 mb-2">
-        <WNButton label="Edit Route" onPress={() => router.back()} />
-      </View>
+        {!poiLoading && groupedVisibleAllRoutePois.length === 0 && (
+          <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
+            <Text className="text-wn-text">
+              No additional stops available for this route.
+            </Text>
+          </View>
+        )}
 
-      {selectedStops.length > 0 && (
-        <View className="mt-4 mb-10">
+        {!poiLoading &&
+          groupedVisibleAllRoutePois.map((group) => (
+            <SuggestedStopsList
+              key={group.category}
+              title={group.title}
+              emptyMessage={`No ${group.title.toLowerCase()} found for this route.`}
+              allSelectedMessage={`All ${group.title.toLowerCase()} have been selected.`}
+              poiLoading={false}
+              poiError={null}
+              suggestedStops={group.stops}
+              totalSuggestedStopCount={group.stops.length}
+              selectedStops={selectedStops}
+              onToggleStop={toggleSelectedStop}
+              collapsible
+              defaultCollapsed
+              stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
+            />
+          ))}
+      </ScrollView>
+
+      <View className="border-t border-wn-border bg-white px-4 pb-6 pt-3 shadow-lg">
+        {finalRouteError && (
+          <Text className="mb-2 text-sm text-red-600">{finalRouteError}</Text>
+        )}
+
+        {selectedStops.length > 0 && (
           <WNButton
             label={
               finalRouteLoading
@@ -434,13 +621,17 @@ const Route = () => {
             onPress={handleBuildFinalRoute}
             disabled={finalRouteLoading}
           />
+        )}
 
-          {finalRouteError && (
-            <Text className="mt-2 text-sm text-red-600">{finalRouteError}</Text>
-          )}
+        <View className={selectedStops.length > 0 ? "mt-3" : ""}>
+          <WNButton
+            label="Edit Route"
+            onPress={() => router.back()}
+            variant="secondary"
+          />
         </View>
-      )}
-    </ScrollView>
+      </View>
+    </View>
   );
 };
 

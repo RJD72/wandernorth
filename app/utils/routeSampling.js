@@ -34,8 +34,7 @@ export function getSamplePointsAlongRoute(routeCoords = []) {
 
   // Define the percentages along the route where we want to sample points
   // These values range from 0 to 1, representing positions from start to end
-  const samplePercentages = [0.1, 0.25, 0.4, 0.5, 0.6, 0.75];
-
+  const samplePercentages = [0.25, 0.5, 0.75, 0.95]; // 25%, 50%, 75%, and 95% (near end of route)
   // Transform each percentage into an actual coordinate point
   return (
     samplePercentages

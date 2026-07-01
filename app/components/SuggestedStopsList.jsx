@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { fetchGooglePlaceDetailsForStop } from "../services/googlePlaces";
 
@@ -117,18 +118,30 @@ function getDistanceOffRouteText(stop) {
 }
 
 const SuggestedStopsList = ({
+  title = "Suggested Stops",
+  emptyMessage = "No stops found for this route.",
+  allSelectedMessage = "All suggested stops have been selected.",
   poiLoading,
   poiError,
   suggestedStops,
   totalSuggestedStopCount = 0,
   selectedStops,
   onToggleStop = () => {},
+  collapsible = false,
+  defaultCollapsed = false,
+  stopCountLabel = null,
 }) => {
   const safeSuggestedStops = Array.isArray(suggestedStops)
     ? suggestedStops
     : [];
 
   const safeSelectedStops = Array.isArray(selectedStops) ? selectedStops : [];
+
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+
+  const resolvedStopCountLabel =
+    stopCountLabel ??
+    `${safeSuggestedStops.length} stop${safeSuggestedStops.length === 1 ? "" : "s"}`;
 
   const [activeStop, setActiveStop] = useState(null);
   const [activeStopDetails, setActiveStopDetails] = useState(null);
@@ -231,91 +244,110 @@ const SuggestedStopsList = ({
   const modalUserRatingCount =
     activeStopDetails?.userRatingCount ?? activeStop?.userRatingCount ?? null;
 
-  const modalGoogleMapsUri =
-    activeStopDetails?.googleMapsUri ?? activeStop?.googleMapsUri ?? null;
-
   return (
     <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
-      <Text className="text-xl font-bold text-wn-forest">Suggested Stops</Text>
+      {collapsible ? (
+        <Pressable
+          onPress={() => setIsCollapsed((current) => !current)}
+          className="flex-row items-center justify-between"
+        >
+          <View className="flex-1 pr-3">
+            <Text className="text-xl font-bold text-wn-forest">{title}</Text>
+            <Text className=" mt-1text-sm text-wn-text">
+              {resolvedStopCountLabel}
+            </Text>
+          </View>
 
-      {poiLoading && (
-        <Text className="mt-3 text-wn-text">
-          Finding suggested stops near your route...
-        </Text>
+          <MaterialCommunityIcons
+            name={isCollapsed ? "chevron-down" : "chevron-up"}
+            size={26}
+            color="#1D3B2A"
+          />
+        </Pressable>
+      ) : (
+        <Text className="text-xl font-bold text-wn-forest">{title}</Text>
       )}
 
-      {poiError && <Text className="mt-3 text-red-600">{poiError}</Text>}
+      {!isCollapsed && (
+        <>
+          {poiLoading && (
+            <Text className="mt-3 text-wn-text">
+              Finding suggested stops near your route...
+            </Text>
+          )}
 
-      {!poiLoading && !poiError && safeSuggestedStops.length === 0 && (
-        <Text className="mt-3 text-wn-text">
-          {totalSuggestedStopCount > 0
-            ? "All suggested stops have been selected."
-            : "No suggested stops found for this route."}
-        </Text>
-      )}
+          {poiError && <Text className="mt-3 text-red-600">{poiError}</Text>}
 
-      {!poiLoading &&
-        !poiError &&
-        safeSuggestedStops.map((stop, index) => {
-          if (!stop) return null;
+          {!poiLoading && !poiError && safeSuggestedStops.length === 0 && (
+            <Text className="mt-3 text-wn-text">
+              {totalSuggestedStopCount > 0 ? allSelectedMessage : emptyMessage}
+            </Text>
+          )}
 
-          const selected = isStopSelected(stop);
-          const stopId = getStopId(stop);
+          {!poiLoading &&
+            !poiError &&
+            safeSuggestedStops.map((stop, index) => {
+              if (!stop) return null;
 
-          return (
-            <Pressable
-              key={stopId ?? `${getStopTitle(stop)}-${index}`}
-              onPress={() => handleOpenStopDetails(stop)}
-              className={`mt-3 rounded-xl border p-3 ${
-                selected
-                  ? "border-wn-forest bg-wn-green-50"
-                  : "border-wn-border bg-white"
-              }`}
-            >
-              <View className="flex-row items-start justify-between">
-                <View className="flex-1 pr-3">
-                  <Text className="font-semibold text-wn-charcoal">
-                    {index + 1}. {getStopTitle(stop)}
-                  </Text>
+              const selected = isStopSelected(stop);
+              const stopId = getStopId(stop);
 
-                  <Text className="mt-1 text-sm text-wn-text">
-                    {getStopCategory(stop)}
-                  </Text>
-
-                  <Text className="mt-1 text-sm text-wn-text">
-                    {getStopAddress(stop)}
-                  </Text>
-
-                  <Text className="mt-1 text-sm font-medium text-wn-forest">
-                    {getDistanceOffRouteText(stop)}
-                  </Text>
-
-                  <Text className="mt-2 text-xs text-wn-text">
-                    Tap for photos and details
-                  </Text>
-                </View>
-
+              return (
                 <Pressable
-                  onPress={(event) => {
-                    event.stopPropagation?.();
-                    onToggleStop(stop);
-                  }}
-                  className={`rounded-full px-3 py-1 ${
-                    selected ? "bg-wn-forest" : "bg-wn-green-50"
+                  key={stopId ?? `${getStopTitle(stop)}-${index}`}
+                  onPress={() => handleOpenStopDetails(stop)}
+                  className={`mt-3 rounded-xl border p-3 ${
+                    selected
+                      ? "border-wn-forest bg-wn-green-50"
+                      : "border-wn-border bg-white"
                   }`}
                 >
-                  <Text
-                    className={`text-sm font-semibold ${
-                      selected ? "text-white" : "text-wn-forest"
-                    }`}
-                  >
-                    {selected ? "Remove" : "Add"}
-                  </Text>
+                  <View className="flex-row items-start justify-between">
+                    <View className="flex-1 pr-3">
+                      <Text className="font-semibold text-wn-charcoal">
+                        {index + 1}. {getStopTitle(stop)}
+                      </Text>
+
+                      <Text className="mt-1 text-sm text-wn-text">
+                        {getStopCategory(stop)}
+                      </Text>
+
+                      <Text className="mt-1 text-sm text-wn-text">
+                        {getStopAddress(stop)}
+                      </Text>
+
+                      <Text className="mt-1 text-sm font-medium text-wn-forest">
+                        {getDistanceOffRouteText(stop)}
+                      </Text>
+
+                      <Text className="mt-2 text-xs text-wn-text">
+                        Tap for photos and details
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation?.();
+                        onToggleStop(stop);
+                      }}
+                      className={`rounded-full px-3 py-1 ${
+                        selected ? "bg-wn-forest" : "bg-wn-green-50"
+                      }`}
+                    >
+                      <Text
+                        className={`text-sm font-semibold ${
+                          selected ? "text-white" : "text-wn-forest"
+                        }`}
+                      >
+                        {selected ? "Remove" : "Add"}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </Pressable>
-              </View>
-            </Pressable>
-          );
-        })}
+              );
+            })}
+        </>
+      )}
 
       <Modal
         visible={!!activeStop}

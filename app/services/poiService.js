@@ -64,7 +64,7 @@ const GOOGLE_PLACE_TYPE_MAP = {
 const DEFAULT_GOOGLE_TYPES = ["cafe", "restaurant", "tourist_attraction"];
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
-const MAX_ROUTE_POINTS_TO_SEARCH = 3;
+const MAX_ROUTE_POINTS_TO_SEARCH = 4;
 const MAX_POI_TYPES_TO_SEARCH = 2;
 
 /**
@@ -125,7 +125,8 @@ function normalizeGooglePlace(place, fallbackCategory) {
     googlePlaceId: place.id,
 
     name: place.displayName?.text || "Unnamed place",
-    category: place.primaryType || fallbackCategory || "place",
+    category: fallbackCategory || place.primaryType || "place",
+    googlePrimaryType: place.primaryType || null,
     address: place.formattedAddress || "",
 
     latitude,
@@ -142,8 +143,8 @@ function normalizeGooglePlace(place, fallbackCategory) {
  *
  * Request strategy:
  * - Each call targets one (point, type) pair.
- * - rankPreference "POPULARITY" prioritizes known/visited places over purely
- *   nearest distance, which generally gives better stop recommendations.
+ * - rankPreference "DISTANCE" prioritizes places closer to the point over purely
+ *   popular places, which generally gives better stop recommendations.
  * - A small field mask limits payload size and billing scope.
  *
  * Error behavior:
@@ -154,14 +155,14 @@ function normalizeGooglePlace(place, fallbackCategory) {
  * @param {object} args
  * @param {{ latitude: number, longitude: number }} args.point
  * @param {string} args.googleType
- * @param {number} [args.radiusMeters=2500]
+ * @param {number} [args.radiusMeters=3000]
  * @param {number} [args.maxResultCount=5]
  * @returns {Promise<object[]>}
  */
 async function fetchNearbyPlacesForPoint({
   point,
   googleType,
-  radiusMeters = 2500,
+  radiusMeters = 3000,
   maxResultCount = 5,
 }) {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -192,7 +193,8 @@ async function fetchNearbyPlacesForPoint({
     body: JSON.stringify({
       includedTypes: [googleType],
       maxResultCount,
-      rankPreference: "POPULARITY",
+      rankPreference: "DISTANCE",
+      regionCode: "CA",
       locationRestriction: {
         circle: {
           center: {
@@ -206,6 +208,15 @@ async function fetchNearbyPlacesForPoint({
   });
 
   const data = await response.json();
+
+  console.log("[poiService] Google Places raw result:", {
+    googleType,
+    radiusMeters,
+    point,
+    status: response.status,
+    placeCount: data.places?.length ?? 0,
+    firstPlace: data.places?.[0]?.displayName?.text ?? null,
+  });
 
   if (!response.ok) {
     console.log("[poiService] Google Places error:", data);
@@ -244,6 +255,63 @@ function dedupePois(pois = []) {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Picks evenly spaced route points from the full route.
+ *
+ * Why this exists:
+ * routePoints.slice(0, 3) only searches the beginning of the route.
+ * For Wander North, we need candidates from early, middle, and late route areas.
+ *
+ * @param {Array<{ latitude: number, longitude: number }>} routePoints
+ * @param {number} maxPoints
+ * @returns {Array<{ latitude: number, longitude: number }>}
+ */
+function getEvenlySpacedRoutePoints(routePoints = [], maxPoints = 3) {
+  if (!Array.isArray(routePoints) || routePoints.length === 0) {
+    return [];
+  }
+
+  if (routePoints.length <= maxPoints) {
+    return routePoints;
+  }
+
+  if (maxPoints <= 1) {
+    return [routePoints[0]];
+  }
+
+  const lastIndex = routePoints.length - 1;
+  const step = lastIndex / (maxPoints - 1);
+
+  return Array.from({ length: maxPoints }, (_, index) => {
+    const routePointIndex = Math.round(index * step);
+    return routePoints[routePointIndex];
+  });
+}
+
+function getSearchRadiusForType(googleType) {
+  const type = String(googleType || "").toLowerCase();
+
+  /**
+   * Restaurants, gas, and lodging are often clustered around towns,
+   * not exactly beside the sampled highway coordinate
+   */
+  if (
+    type === "restaurant" ||
+    type === "cafe" ||
+    type === "bar" ||
+    type === "lodging" ||
+    type === "gas_station"
+  ) {
+    return 6000;
+  }
+
+  /**
+   * Parks and attractions can stay tighter because a huge radius can pull in
+   * unrelated outdoor areas that are not really route-relevant
+   */
+  return 3500;
 }
 
 /**
@@ -305,16 +373,22 @@ export async function fetchPoisNearRoutePoints({
     return [];
   }
 
-  /**
-   * Temporary safety guard:
-   * Search at most 3 route points and at most 2 selected POI types.
-   *
-   * Why?
-   * 3 route points × 2 types = 6 API calls.
-   * That is enough for testing without going wild.
-   */
-  const pointsToSearch = routePoints.slice(0, MAX_ROUTE_POINTS_TO_SEARCH);
+  const pointsToSearch = getEvenlySpacedRoutePoints(
+    routePoints,
+    MAX_ROUTE_POINTS_TO_SEARCH,
+  );
   const typesToSearch = googleTypes.slice(0, MAX_POI_TYPES_TO_SEARCH);
+
+  console.log(
+    "[poiService] Incoming sampled route points:",
+    routePoints.length,
+  );
+  console.log("[poiService] Points actually searched:", pointsToSearch.length);
+  console.log("[poiService] Types actually searched:", typesToSearch);
+  console.log(
+    "[poiService] Search request count:",
+    pointsToSearch.length * typesToSearch.length,
+  );
 
   // Build all request promises first so they can execute in parallel.
   const requests = [];
@@ -325,7 +399,7 @@ export async function fetchPoisNearRoutePoints({
         fetchNearbyPlacesForPoint({
           point,
           googleType,
-          radiusMeters: 2500,
+          radiusMeters: getSearchRadiusForType(googleType),
           maxResultCount: 5,
         }),
       );
@@ -347,8 +421,13 @@ export async function fetchPoisNearRoutePoints({
   const dedupedPois = dedupePois(allPois);
 
   /**
-   * For now, return the first N.
-   * Later, this is where route-position scoring and quality scoring will go.
+   * Return the full candidate pool.
+   *
+   * Important:
+   * Do NOT slice to safeNumStops here anymore.
+   *
+   * poiService's job is to fetch possible stops.
+   * poiScoring.js decides which stops are actually worth showing.
    */
-  return dedupedPois.slice(0, safeNumStops);
+  return dedupedPois;
 }

@@ -40,17 +40,33 @@ function getStopAddress(stop) {
 export default function SelectedStopsList({
   selectedStops = [],
   onRemoveStop,
+  onRemoveAllStops,
 }) {
   return (
     <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
-      <Text className="text-xl font-bold text-wn-forest">Selected Stops</Text>
+      <View
+        className={`${selectedStops.length > 0 ? "flex-row items-center justify-between" : ""}`}
+      >
+        <Text className="text-xl font-bold text-wn-forest">Selected Stops</Text>
 
-      {selectedStops.length === 0 && (
-        <Text className="mt-3 text-wn-text">
-          No stops selected yet. Add a few suggested stops to customize your
-          route.
-        </Text>
-      )}
+        {selectedStops.length === 0 && (
+          <Text className="mt-3 text-wn-text">
+            No stops selected yet. Add a few suggested stops to customize your
+            route.
+          </Text>
+        )}
+
+        {selectedStops.length > 0 && (
+          <Pressable
+            onPress={onRemoveAllStops}
+            className="mt-3 rounded-full bg-red-100 px-3 py-1"
+          >
+            <Text className="text-sm font-semibold text-red-700">
+              Remove All
+            </Text>
+          </Pressable>
+        )}
+      </View>
 
       {selectedStops.map((stop, index) => {
         const stopId = getStopId(stop);
