@@ -1,23 +1,30 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
-import * as Location from "expo-location";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, ScrollView, Text, View } from "react-native";
 
 import AutocompleteInput from "../components/AutoCompleteInput";
 import WNButton from "../components/WNButton";
 import StopCountDropdown from "../components/StopCountDropdown";
 import POITypeSelector from "../components/POITypeSelector";
 import WNTransportSelector from "../components/WNTransportSelector";
+import ScreenIntroCard from "../components/ScreenIntroCard";
+import CurrentLocationToggle from "../components/CurrentLocationToggle";
+import RouteBuildingScreen from "../components/RouteBuildingScreen";
+import PremiumFeatureCard from "../components/PremiumFeatureCard";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
+import { useEntitlementStore } from "../store/useEntitlementStore";
+import {
+  FEATURES,
+  getFeatureLimits,
+  getPremiumFeatureMessage,
+} from "../config/featureAccess";
+import { isValidCoords } from "../utils/coordinates";
+import {
+  geocodeAddress,
+  getCurrentLocationWithLabel,
+} from "../services/locationService";
+import { canBuildGoogleRoute } from "../services/googleRoutes";
 
 const TRANSPORT_OPTIONS = [
   { key: "driving", label: "Drive", icon: "car" },
@@ -25,34 +32,6 @@ const TRANSPORT_OPTIONS = [
   { key: "walking", label: "Walk", icon: "walk" },
   { key: "transit", label: "Transit", icon: "train" },
 ];
-
-function isValidCoords(coords) {
-  return (
-    coords &&
-    typeof coords.latitude === "number" &&
-    typeof coords.longitude === "number" &&
-    Number.isFinite(coords.latitude) &&
-    Number.isFinite(coords.longitude)
-  );
-}
-
-async function geocodeAddress(address) {
-  if (!address?.trim()) return null;
-
-  try {
-    const results = await Location.geocodeAsync(address.trim());
-
-    if (!results?.length) return null;
-
-    return {
-      latitude: results[0].latitude,
-      longitude: results[0].longitude,
-    };
-  } catch (error) {
-    console.log("Navigate geocode error:", error);
-    return null;
-  }
-}
 
 const Navigate = () => {
   const router = useRouter();
@@ -73,51 +52,111 @@ const Navigate = () => {
     setSelectedTravelMode,
     setNumStops,
     setSelectedPoiTypes,
+    setActiveRouteRequest,
     resetRoutePlanner,
   } = useRoutePlannerStore();
+  const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
 
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [locating, setLocating] = useState(false);
   const [findingRoute, setFindingRoute] = useState(false);
+  const [transitAvailable, setTransitAvailable] = useState(null);
+  const [checkingTransit, setCheckingTransit] = useState(false);
+  const [showMoreStopsPaywall, setShowMoreStopsPaywall] = useState(false);
+
+  const featureLimits = getFeatureLimits(subscriptionTier);
+  const maxSuggestedStops = featureLimits.maxSuggestedStops;
+  const requestedStopCount = Number(numStops);
+  const isOverFreeStopLimit =
+    Number.isFinite(requestedStopCount) &&
+    requestedStopCount > maxSuggestedStops;
+  const moreStopsPremiumCopy = getPremiumFeatureMessage(
+    FEATURES.MORE_AUTOMATIC_STOPS,
+  );
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function checkTransitAvailability() {
+      if (
+        !isValidCoords(startingCoords) ||
+        !isValidCoords(destinationCoords)
+      ) {
+        setTransitAvailable(null);
+        setCheckingTransit(false);
+        return;
+      }
+
+      try {
+        setCheckingTransit(true);
+
+        const available = await canBuildGoogleRoute({
+          startingCoords,
+          destinationCoords,
+          travelMode: "transit",
+        });
+
+        if (!isCurrent) return;
+
+        setTransitAvailable(available);
+      } finally {
+        if (isCurrent) {
+          setCheckingTransit(false);
+        }
+      }
+    }
+
+    checkTransitAvailability();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [startingCoords, destinationCoords]);
+
+  useEffect(() => {
+    if (transitAvailable === false && selectedTravelMode === "transit") {
+      setSelectedTravelMode("driving");
+    }
+  }, [transitAvailable, selectedTravelMode, setSelectedTravelMode]);
+
+  const transportOptions = useMemo(() => {
+    return TRANSPORT_OPTIONS.map((option) => {
+      if (option.key !== "transit") return option;
+
+      return {
+        ...option,
+        disabled: transitAvailable === false || checkingTransit,
+      };
+    });
+  }, [transitAvailable, checkingTransit]);
 
   async function getCurrentLocation() {
     try {
       setLocating(true);
       setStartingAddress("Getting your location...");
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const result = await getCurrentLocationWithLabel();
 
-      if (status !== "granted") {
-        Alert.alert(
-          "Location permission needed",
-          "Please allow location access to use your current location.",
-        );
+      if (!result.ok) {
+        if (result.reason === "permission-denied") {
+          Alert.alert(
+            "Location permission needed",
+            "Please allow location access to use your current location.",
+          );
+        } else {
+          Alert.alert(
+            "Location error",
+            "Unable to get your current location. Please try again or enter a starting point.",
+          );
+        }
 
         setStartingAddress("");
         setStartingCoords(null);
         return false;
       }
 
-      const position = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = position.coords;
-
-      const geo = await Location.reverseGeocodeAsync({
-        latitude,
-        longitude,
-      });
-
-      const firstResult = geo?.[0];
-
-      const city =
-        firstResult?.city ||
-        firstResult?.subregion ||
-        firstResult?.region ||
-        "Current Location";
-
-      const region = firstResult?.region || "";
-
-      setStartingAddress(region ? `${city}, ${region}` : city);
-      setStartingCoords({ latitude, longitude });
+      setStartingAddress(result.addressLabel);
+      setStartingCoords(result.coords);
 
       return true;
     } catch (error) {
@@ -137,6 +176,11 @@ const Navigate = () => {
   }
 
   async function handleFindRoute() {
+    if (isOverFreeStopLimit) {
+      setShowMoreStopsPaywall(true);
+      return;
+    }
+
     try {
       setFindingRoute(true);
 
@@ -171,6 +215,37 @@ const Navigate = () => {
         setDestinationCoords(finalDestinationCoords);
       }
 
+      if (selectedTravelMode === "transit") {
+        const transitRouteAvailable = await canBuildGoogleRoute({
+          startingCoords: finalStartCoords,
+          destinationCoords: finalDestinationCoords,
+          travelMode: "transit",
+        });
+
+        if (!transitRouteAvailable) {
+          setTransitAvailable(false);
+          setSelectedTravelMode("driving");
+
+          Alert.alert(
+            "Transit unavailable",
+            "Transit is not available for this route. Please choose another travel mode.",
+          );
+
+          return;
+        }
+      }
+
+      setActiveRouteRequest({
+        source: "navigate",
+        startingAddress,
+        destinationAddress,
+        startingCoords: finalStartCoords,
+        destinationCoords: finalDestinationCoords,
+        travelMode: selectedTravelMode,
+        numStops,
+        selectedPoiTypes,
+      });
+
       router.push({
         pathname: "/(screens)/route",
         params: {
@@ -185,6 +260,16 @@ const Navigate = () => {
   function handleReset() {
     resetRoutePlanner();
     setUseCurrentLocation(false);
+    setShowMoreStopsPaywall(false);
+  }
+
+  if (findingRoute) {
+    return (
+      <RouteBuildingScreen
+        title="Preparing your route"
+        message="Checking your start and destination before building the route."
+      />
+    );
   }
 
   return (
@@ -193,14 +278,10 @@ const Navigate = () => {
       contentContainerStyle={{ paddingBottom: 40 }}
     >
       <View className="px-2 pt-4">
-        <View className="mb-5 rounded-3xl bg-white/10 px-4 py-5">
-          <Text className="text-3xl font-bold text-white">Navigate</Text>
-
-          <Text className="mt-2 text-base leading-6 text-white/80">
-            Enter a starting point and destination, choose your travel mode, and
-            Wander North will build a route with possible stops along the way.
-          </Text>
-        </View>
+        <ScreenIntroCard
+          title="Navigate"
+          description="Enter a starting point and destination, choose your travel mode, and Wander North will build a route with possible stops along the way."
+        />
 
         <AutocompleteInput
           label="Starting Point"
@@ -219,43 +300,24 @@ const Navigate = () => {
           }}
         />
 
-        <View className="mb-2 flex-row items-center justify-between px-2">
-          <Text className="text-text-primary">
-            {useCurrentLocation
-              ? "Using current location"
-              : "Use current location"}
-          </Text>
+        <CurrentLocationToggle
+          useCurrentLocation={useCurrentLocation}
+          locating={locating}
+          onPress={async () => {
+            if (useCurrentLocation) {
+              setUseCurrentLocation(false);
+              setStartingAddress("");
+              setStartingCoords(null);
+              return;
+            }
 
-          <Pressable
-            onPress={async () => {
-              if (useCurrentLocation) {
-                setUseCurrentLocation(false);
-                setStartingAddress("");
-                setStartingCoords(null);
-                return;
-              }
+            const ok = await getCurrentLocation();
 
-              const ok = await getCurrentLocation();
-
-              if (ok) {
-                setUseCurrentLocation(true);
-              }
-            }}
-            className={`h-11 w-11 items-center justify-center rounded-full ${
-              useCurrentLocation ? "bg-emerald-700" : "bg-white/15"
-            }`}
-          >
-            {locating ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <MaterialCommunityIcons
-                name={useCurrentLocation ? "crosshairs-gps" : "crosshairs"}
-                size={24}
-                color="white"
-              />
-            )}
-          </Pressable>
-        </View>
+            if (ok) {
+              setUseCurrentLocation(true);
+            }
+          }}
+        />
 
         <AutocompleteInput
           label="Destination"
@@ -273,14 +335,27 @@ const Navigate = () => {
 
         <View className="mt-5">
           <Text className="mb-2 ml-2 text-sm font-semibold text-white">
-            Choose how you are travelling
+            Choose how you are traveling
           </Text>
 
           <WNTransportSelector
             value={selectedTravelMode}
             onChange={setSelectedTravelMode}
-            options={TRANSPORT_OPTIONS}
+            options={transportOptions}
           />
+
+          {checkingTransit && (
+            <Text className="ml-2 mt-1 text-xs text-white/70">
+              Checking transit availability for this route...
+            </Text>
+          )}
+
+          {!checkingTransit && transitAvailable === false && (
+            <Text className="ml-2 mt-1 text-xs text-white/70">
+              Transit is unavailable for this route, so Drive is selected
+              instead.
+            </Text>
+          )}
         </View>
 
         <View className="mt-5 rounded-2xl bg-white/10 p-4">
@@ -304,7 +379,26 @@ const Navigate = () => {
 
         <View className="mt-5">
           <StopCountDropdown value={numStops} onChange={setNumStops} />
+
+          <Text className="ml-2 mt-1 text-xs text-white/70">
+            {Number.isFinite(maxSuggestedStops)
+              ? `Free routes include up to ${maxSuggestedStops} automatic stops.`
+              : "Premium route planning is enabled."}
+          </Text>
         </View>
+
+        {showMoreStopsPaywall && (
+          <PremiumFeatureCard
+            title={moreStopsPremiumCopy.title}
+            message={moreStopsPremiumCopy.message}
+            onClose={() => setShowMoreStopsPaywall(false)}
+            showDevToggle
+            onEnablePremiumForTesting={() => {
+              setPremiumForTesting(true);
+              setShowMoreStopsPaywall(false);
+            }}
+          />
+        )}
 
         <View className="mt-8 gap-4">
           <WNButton
@@ -321,6 +415,7 @@ const Navigate = () => {
           />
         </View>
       </View>
+
     </ScrollView>
   );
 };

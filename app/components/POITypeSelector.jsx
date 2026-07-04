@@ -134,11 +134,11 @@ export default function POITypeSelector({
         onPress={() => setIsOpen(true)}
         accessibilityRole="button" // Screen readers announce this as a button
         accessibilityState={{ expanded: isOpen }} // Communicates open/closed state to assistive tech
-        className="flex-row items-center justify-between rounded-2xl border border-forest-200 bg-white px-4 py-4"
+        className="flex-row items-center justify-between rounded-2xl border border-emerald-200 bg-white px-4 py-4"
       >
         <View className="mr-3 flex-1">
           {/* Primary line: compact summary of selected types (computed by selectedSummary memo) */}
-          <Text className="text-base font-medium text-forest-900">
+          <Text className="text-base font-medium text-emerald-950">
             {selectedSummary}
           </Text>
 
@@ -175,7 +175,7 @@ export default function POITypeSelector({
             {/* Header */}
             <View className="mb-4 flex-row items-center justify-between">
               <View className="mr-4 flex-1">
-                <Text className="text-lg font-bold text-forest-900">
+                <Text className="text-lg font-bold text-emerald-950">
                   Choose stop types
                 </Text>
 
@@ -205,7 +205,7 @@ export default function POITypeSelector({
               {/* "Clear all" is only rendered when at least one type is selected */}
               {selectedPoiTypes.length > 0 && (
                 <Pressable onPress={handleClearAll}>
-                  <Text className="text-sm font-semibold text-forest-800">
+                  <Text className="text-sm font-semibold text-emerald-800">
                     Clear all
                   </Text>
                 </Pressable>
@@ -228,7 +228,7 @@ export default function POITypeSelector({
                     onPress={() => handleTogglePoiType(poiType.id)}
                     // Highlight the row with a forest tint when selected; neutral otherwise.
                     className={`mb-2 flex-row items-center justify-between rounded-2xl px-4 py-4 ${
-                      isSelected ? "bg-forest-100" : "bg-stone-50"
+                      isSelected ? "bg-emerald-100" : "bg-stone-50"
                     }`}
                   >
                     <View className="flex-row items-center">
@@ -238,7 +238,7 @@ export default function POITypeSelector({
                        */}
                       <View
                         className={`mr-3 h-10 w-10 items-center justify-center rounded-full ${
-                          isSelected ? "bg-forest-800" : "bg-white"
+                          isSelected ? "bg-emerald-800" : "bg-white"
                         }`}
                       >
                         <MaterialCommunityIcons
@@ -252,7 +252,7 @@ export default function POITypeSelector({
                       <Text
                         className={`text-base ${
                           isSelected
-                            ? "font-bold text-forest-900"
+                            ? "font-bold text-emerald-950"
                             : "font-medium text-stone-700"
                         }`}
                       >
@@ -290,7 +290,7 @@ export default function POITypeSelector({
              */}
             <Pressable
               onPress={() => setIsOpen(false)}
-              className="mt-4 rounded-2xl bg-forest-800 px-4 py-4"
+              className="mt-4 rounded-2xl bg-emerald-800 px-4 py-4"
             >
               <Text className="text-center text-base font-bold text-white">
                 Done

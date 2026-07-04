@@ -15,6 +15,8 @@
  *   - POIs far away from the route
  */
 
+import { MAX_DISTANCE_FROM_ROUTE_METERS } from "./poiDistancePolicy";
+
 /**Converts any value into a safe infinite number
  *
  * @param {unknown} value - The value to convert.
@@ -170,6 +172,37 @@ function getReviewCountScore(poi) {
   return clamp(scaled * 5, 0, 15);
 }
 
+const COMMON_CHAIN_NAME_PATTERNS = [
+  /^tim hortons\b/i,
+  /^mcdonald(?:'|’)?s\b/i,
+  /^a\s*&\s*w\b/i,
+  /^popeyes\b/i,
+  /^subway\b/i,
+  /^burger king\b/i,
+  /^wendy(?:'|’)?s\b/i,
+  /^starbucks\b/i,
+  /^pizzaville\b/i,
+  /^mary brown(?:'|’)?s\b/i,
+  /^harvey(?:'|’)?s\b/i,
+  /^kfc\b/i,
+  /^domino(?:'|’)?s\b/i,
+  /^pizza hut\b/i,
+  /^dairy queen\b/i,
+  /^little caesars\b/i,
+  /^pizza pizza\b/i,
+  /^papa john(?:'|’)?s\b/i,
+];
+
+const COMMON_CHAIN_SCORE_PENALTY = 12;
+
+function isLikelyChainPoi(poi) {
+  const name = String(
+    poi?.name ?? poi?.title ?? poi?.displayName?.text ?? "",
+  ).trim();
+
+  return COMMON_CHAIN_NAME_PATTERNS.some((pattern) => pattern.test(name));
+}
+
 /**
  * Calculates one total POI score based on distance, rating, and review count
  *
@@ -183,12 +216,19 @@ function getReviewCountScore(poi) {
  * @param {number} options.maxDistanceFromRouteMeters - The maximum distance from the route in meters.
  * @returns {number} - The total score for the POI.
  */
-export function scorePoi(poi, { maxDistanceFromRouteMeters = 3000 }) {
+export function scorePoi(
+  poi,
+  { maxDistanceFromRouteMeters = MAX_DISTANCE_FROM_ROUTE_METERS } = {},
+) {
   const distanceScore = getDistanceScore(poi, maxDistanceFromRouteMeters);
   const ratingScore = getRatingScore(poi);
   const reviewCountScore = getReviewCountScore(poi);
+  const chainPenalty = isLikelyChainPoi(poi) ? COMMON_CHAIN_SCORE_PENALTY : 0;
 
-  const totalScore = distanceScore + ratingScore + reviewCountScore;
+  const totalScore = Math.max(
+    0,
+    distanceScore + ratingScore + reviewCountScore - chainPenalty,
+  );
 
   return Math.round(totalScore * 10) / 10; // Round to 1 decimal place for easier debugging and display
 }
@@ -263,7 +303,10 @@ function attachNormalizedProgress(pois) {
 export function chooseDistributedStops(
   pois = [],
   stopLimit = 3,
-  { maxDistanceFromRouteMeters = 3000, preferredCategories = [] } = {},
+  {
+    maxDistanceFromRouteMeters = MAX_DISTANCE_FROM_ROUTE_METERS,
+    preferredCategories = [],
+  } = {},
 ) {
   const parsedStopLimit = Number(stopLimit);
 

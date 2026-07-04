@@ -183,6 +183,26 @@ export async function buildGoogleRoute({
   };
 }
 
+export async function canBuildGoogleRoute({
+  startingCoords,
+  destinationCoords,
+  travelMode,
+  waypoints = [],
+}) {
+  try {
+    await buildGoogleRoute({
+      startingCoords,
+      destinationCoords,
+      travelMode,
+      waypoints,
+    });
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // formatDistance  (private)
 // ---------------------------------------------------------------------------

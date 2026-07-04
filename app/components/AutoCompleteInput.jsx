@@ -9,6 +9,101 @@ import {
 } from "react-native";
 import WNInput from "./WNInput";
 
+const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
+const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
+
+function isValidSearchPoint(point) {
+  return (
+    point &&
+    typeof point.latitude === "number" &&
+    typeof point.longitude === "number" &&
+    Number.isFinite(point.latitude) &&
+    Number.isFinite(point.longitude)
+  );
+}
+
+function normalizeTextSearchPlace(place) {
+  const title = place?.displayName?.text;
+
+  if (!place?.id || !title) return null;
+
+  return {
+    place_id: place.id,
+    description: place.formattedAddress
+      ? `${title} · ${place.formattedAddress}`
+      : title,
+    source: "text-search",
+  };
+}
+
+function mergePredictions(...predictionGroups) {
+  const seenPlaceIds = new Set();
+
+  return predictionGroups.flat().filter((prediction) => {
+    if (!prediction?.place_id || seenPlaceIds.has(prediction.place_id)) {
+      return false;
+    }
+
+    seenPlaceIds.add(prediction.place_id);
+    return true;
+  });
+}
+
+async function fetchRouteTextSearchPredictions({
+  inputText,
+  searchPoints,
+  apiKey,
+}) {
+  const routeSearchPoints = searchPoints
+    .filter(isValidSearchPoint)
+    .slice(0, MAX_CUSTOM_TEXT_SEARCH_POINTS);
+
+  const searchResults = await Promise.allSettled(
+    routeSearchPoints.map(async (point) => {
+      const response = await fetch(
+        "https://places.googleapis.com/v1/places:searchText",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": apiKey,
+            "X-Goog-FieldMask":
+              "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType",
+          },
+          body: JSON.stringify({
+            textQuery: inputText,
+            locationBias: {
+              circle: {
+                center: {
+                  latitude: point.latitude,
+                  longitude: point.longitude,
+                },
+                radius: CUSTOM_TEXT_SEARCH_RADIUS_METERS,
+              },
+            },
+            regionCode: "CA",
+            maxResultCount: 5,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Places Text Search failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      return (data.places ?? [])
+        .map(normalizeTextSearchPlace)
+        .filter(Boolean);
+    }),
+  );
+
+  return searchResults.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+}
+
 /**
  * AutocompleteInput Component
  *
@@ -25,6 +120,11 @@ export default function AutocompleteInput({
   editable = true,
   rightElement = null,
   onDropdownVisibleChange = () => {}, // Callback to notify parent when dropdown visibility changes
+  autocompleteTypes = "geocode",
+  locationBias = null,
+  strictBounds = false,
+  dropdownMode = "absolute",
+  customSearchPoints = [],
 }) {
   // ============ STATE MANAGEMENT ============
 
@@ -50,6 +150,7 @@ export default function AutocompleteInput({
 
   // Reference to the TextInput inside WNInput for focus/blur control
   const inputRef = useRef(null);
+  const latestPredictionRequestId = useRef(0);
 
   // ============ EFFECTS ============
   useEffect(() => {
@@ -78,8 +179,10 @@ export default function AutocompleteInput({
     // Clear predictions if input is too short
     // Don't waste API calls on very short input that won't yield useful results
     if (!input || input.length < 2) {
+      latestPredictionRequestId.current += 1;
       setPredictions([]);
       setShowList(false);
+      setLoading(false);
       return;
     }
 
@@ -103,35 +206,90 @@ export default function AutocompleteInput({
    * @param {string} inputText - The user's input text to search for
    */
   const fetchPredictions = async (inputText) => {
+    const requestId = latestPredictionRequestId.current + 1;
+    latestPredictionRequestId.current = requestId;
+
     try {
       setLoading(true);
 
       // Build URL with encoded input and API filters
-      const url =
+      let url =
         `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
         `input=${encodeURIComponent(inputText)}` + // Takes user input & makes it safe for URL (e.g. spaces become %20)
-        `&components=country:ca` + // Restrict results to Canadian locations
-        `&types=geocode` + // Restrict results to geocode type (addresses only, no businesses)
-        `&key=${apiKey}`;
+        `&components=country:ca`; // Restrict results to Canadian locations
+
+      if (
+        typeof autocompleteTypes === "string" &&
+        autocompleteTypes.trim()
+      ) {
+        url += `&types=${encodeURIComponent(autocompleteTypes.trim())}`;
+      }
+
+      if (locationBias) {
+        url +=
+          `&location=${locationBias.latitude},${locationBias.longitude}` +
+          `&radius=${locationBias.radiusMeters}`;
+
+        if (strictBounds) {
+          url += `&strictbounds=true`;
+        }
+      }
+
+      url += `&key=${apiKey}`;
 
       const res = await fetch(url);
       const data = await res.json();
 
-      // Update predictions if API returns results
-      if (data.status === "OK" && data.predictions?.length > 0) {
-        setPredictions(data.predictions);
+      if (latestPredictionRequestId.current !== requestId) {
+        return;
+      }
+
+      const autocompletePredictions =
+        data.status === "OK" && data.predictions?.length > 0
+          ? data.predictions
+          : [];
+
+      const shouldRunRouteTextSearch =
+        inputText.length >= 2 &&
+        customSearchPoints.length > 0 &&
+        (dropdownMode === "inline" || autocompleteTypes === null);
+
+      const textSearchPredictions = shouldRunRouteTextSearch
+        ? await fetchRouteTextSearchPredictions({
+            inputText,
+            searchPoints: customSearchPoints,
+            apiKey,
+          })
+        : [];
+
+      if (latestPredictionRequestId.current !== requestId) {
+        return;
+      }
+
+      const mergedPredictions = mergePredictions(
+        textSearchPredictions,
+        autocompletePredictions,
+      );
+
+      if (mergedPredictions.length > 0) {
+        setPredictions(mergedPredictions);
         setShowList(true);
       } else {
-        // Clear list if no results or API error
         setPredictions([]);
         setShowList(false);
       }
     } catch (err) {
+      if (latestPredictionRequestId.current !== requestId) {
+        return;
+      }
+
       console.log("Autocomplete error:", err);
       setPredictions([]);
       setShowList(false);
     } finally {
-      setLoading(false);
+      if (latestPredictionRequestId.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
@@ -182,6 +340,8 @@ export default function AutocompleteInput({
    * @param {Object} prediction - The selected prediction object
    */
   const handleSelect = async (prediction) => {
+    latestPredictionRequestId.current += 1;
+
     // Stop treating input as "typing" to prevent dropdown reopening
     setIsTyping(false);
 
@@ -243,17 +403,26 @@ export default function AutocompleteInput({
         placeholder={placeholder}
         editable={editable}
         rightElement={rightElement}
+        withBottomMargin={!(dropdownMode === "inline" && showList)}
       />
 
       {/* Dropdown suggestions list */}
       {showList && (
         <View
-          style={{ maxHeight: 240, zIndex: 1003, elevation: 1003 }}
-          className="absolute left-0 right-0 top-[85%] bg-white border border-forest/20 rounded-xl z-50 shadow-lg "
+          style={
+            dropdownMode === "inline"
+              ? { maxHeight: 240 }
+              : { maxHeight: 240, zIndex: 1003, elevation: 1003 }
+          }
+          className={
+            dropdownMode === "inline"
+              ? "mt-0 overflow-hidden rounded-xl border border-emerald-800/20 bg-white shadow-lg"
+              : "absolute left-0 right-0 top-[85%] z-50 rounded-xl border border-emerald-800/20 bg-white shadow-lg"
+          }
         >
           <ScrollView
             nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
+            keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator
             style={{ maxHeight: 200 }}
           >
@@ -261,7 +430,7 @@ export default function AutocompleteInput({
             {loading && (
               <View className="p-3 items-center">
                 <ActivityIndicator size="small" color="#0000FF" />
-                <Text className="text-xs text-charcoal mt-2">Loading...</Text>
+                <Text className="mt-2 text-xs text-stone-900">Loading...</Text>
               </View>
             )}
 
@@ -277,9 +446,9 @@ export default function AutocompleteInput({
               <Pressable
                 key={p.place_id}
                 onPress={() => handleSelect(p)}
-                className="p-3 border-b border-forest/10"
+                className="border-b border-emerald-800/10 p-3"
               >
-                <Text className="text-charcoal">{p.description}</Text>
+                <Text className="text-stone-900">{p.description}</Text>
               </Pressable>
             ))}
           </ScrollView>

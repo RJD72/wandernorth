@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { View, Text, Pressable, Modal, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 // The range of stop counts available for selection (0 = no extra stops, up to 10).
@@ -40,17 +47,17 @@ export default function StopCountDropdown({
   return (
     <View className="w-full">
       {/* Field label rendered above the trigger button */}
-      <Text className="mb-2 text-sm font-semibold text-forest-900">
+      <Text className="mb-2 text-sm font-semibold text-white">
         {label}
       </Text>
 
       {/* Trigger button — displays the current selection and opens the modal on press */}
       <Pressable
         onPress={() => setIsOpen(true)}
-        className="flex-row items-center justify-between rounded-2xl border border-forest-200 bg-white px-4 py-4"
+        className="flex-row items-center justify-between rounded-2xl border border-emerald-200 bg-white px-4 py-4"
       >
         {/* Display "No extra stops" for 0, otherwise "N stop(s)" */}
-        <Text className="text-base font-medium text-forest-900">
+        <Text className="text-base font-medium text-emerald-950">
           {value === 0
             ? "No extra stops"
             : `${value} stop${value > 1 ? "s" : ""}`}
@@ -74,10 +81,10 @@ export default function StopCountDropdown({
         >
           {/* Bottom sheet container — stopPropagation is implicit via a nested Pressable
               so taps inside the sheet don't bubble up and close the modal */}
-          <Pressable className="rounded-t-3xl bg-white px-5 pb-8 pt-5">
+          <Pressable className="max-h-[80%] rounded-t-3xl bg-white px-5 pb-8 pt-5">
             {/* Sheet header: title on the left, close button on the right */}
             <View className="mb-4 flex-row items-center justify-between">
-              <Text className="text-lg font-bold text-forest-900">
+              <Text className="text-lg font-bold text-emerald-950">
                 Choose number of stops
               </Text>
 
@@ -86,44 +93,49 @@ export default function StopCountDropdown({
               </TouchableOpacity>
             </View>
 
-            {/* Render a tappable row for each stop option */}
-            {stopOptions.map((count) => {
-              // Determine whether this option matches the current value.
-              const isSelected = value === count;
+            <ScrollView
+              showsVerticalScrollIndicator
+              contentContainerStyle={{ paddingBottom: 8 }}
+            >
+              {/* Render a tappable row for each stop option */}
+              {stopOptions.map((count) => {
+                // Determine whether this option matches the current value.
+                const isSelected = value === count;
 
-              return (
-                <Pressable
-                  key={count}
-                  onPress={() => handleSelectStop(count)}
-                  // Highlight the selected option with a forest tint; others get a neutral background.
-                  className={`mb-2 flex-row items-center justify-between rounded-2xl px-4 py-4 ${
-                    isSelected ? "bg-forest-100" : "bg-stone-50"
-                  }`}
-                >
-                  {/* Option label — bold and forest-coloured when selected */}
-                  <Text
-                    className={`text-base ${
-                      isSelected
-                        ? "font-bold text-forest-900"
-                        : "font-medium text-stone-700"
+                return (
+                  <Pressable
+                    key={count}
+                    onPress={() => handleSelectStop(count)}
+                    // Highlight the selected option with a forest tint; others get a neutral background.
+                    className={`mb-2 flex-row items-center justify-between rounded-2xl px-4 py-4 ${
+                      isSelected ? "bg-emerald-100" : "bg-stone-50"
                     }`}
                   >
-                    {count === 0
-                      ? "No extra stops"
-                      : `${count} stop${count > 1 ? "s" : ""}`}
-                  </Text>
+                    {/* Option label — bold and forest-coloured when selected */}
+                    <Text
+                      className={`text-base ${
+                        isSelected
+                          ? "font-bold text-emerald-950"
+                          : "font-medium text-stone-700"
+                      }`}
+                    >
+                      {count === 0
+                        ? "No extra stops"
+                        : `${count} stop${count > 1 ? "s" : ""}`}
+                    </Text>
 
-                  {/* Checkmark icon — only rendered for the currently selected option */}
-                  {isSelected && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={22}
-                      color="#1D3B2A"
-                    />
-                  )}
-                </Pressable>
-              );
-            })}
+                    {/* Checkmark icon — only rendered for the currently selected option */}
+                    {isSelected && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color="#1D3B2A"
+                      />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>

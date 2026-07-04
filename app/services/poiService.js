@@ -64,7 +64,7 @@ const GOOGLE_PLACE_TYPE_MAP = {
 const DEFAULT_GOOGLE_TYPES = ["cafe", "restaurant", "tourist_attraction"];
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
-const MAX_ROUTE_POINTS_TO_SEARCH = 4;
+const MAX_ROUTE_POINTS_TO_SEARCH = 5;
 const MAX_POI_TYPES_TO_SEARCH = 2;
 
 /**
@@ -76,25 +76,50 @@ const MAX_POI_TYPES_TO_SEARCH = 2;
  * "tourist_attraction"). This translation layer keeps Google-specific naming
  * isolated to the service layer.
  *
- * Behavior details:
- * - If input is missing/empty/not an array, we fall back to default types.
- * - Unknown app ids are dropped via filter(Boolean).
- * - If every selected id is unknown, we still return defaults instead of an
- *   empty list so callers always have useful search behavior.
+ * Unknown app ids are dropped and duplicate Google types are removed.
  *
  * @param {string[]} selectedPoiTypes
  * @returns {string[]} Google Places includedTypes values
  */
-function getGooglePlaceTypes(selectedPoiTypes = []) {
-  if (!Array.isArray(selectedPoiTypes) || selectedPoiTypes.length === 0) {
-    return DEFAULT_GOOGLE_TYPES;
+export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
+  if (!Array.isArray(selectedPoiTypes)) {
+    return [];
   }
 
   const mappedTypes = selectedPoiTypes
     .map((type) => GOOGLE_PLACE_TYPE_MAP[String(type).trim().toLowerCase()])
     .filter(Boolean);
 
+  return [...new Set(mappedTypes)];
+}
+
+function getGooglePlaceTypes(selectedPoiTypes = []) {
+  const mappedTypes = normalizeSelectedPoiTypes(selectedPoiTypes);
+
   return mappedTypes.length > 0 ? mappedTypes : DEFAULT_GOOGLE_TYPES;
+}
+
+function prioritizeGoogleTypesForSearch(
+  googleTypes = [],
+  selectedPoiTypes = [],
+) {
+  const uniqueGoogleTypes = [...new Set(googleTypes)];
+
+  const explicitlySelectedRestaurant =
+    Array.isArray(selectedPoiTypes) &&
+    selectedPoiTypes.some((type) => {
+      const normalizedType = String(type).trim().toLowerCase();
+      return GOOGLE_PLACE_TYPE_MAP[normalizedType] === "restaurant";
+    });
+
+  if (!explicitlySelectedRestaurant) {
+    return uniqueGoogleTypes;
+  }
+
+  return [
+    "restaurant",
+    ...uniqueGoogleTypes.filter((type) => type !== "restaurant"),
+  ];
 }
 
 /**
@@ -377,7 +402,14 @@ export async function fetchPoisNearRoutePoints({
     routePoints,
     MAX_ROUTE_POINTS_TO_SEARCH,
   );
-  const typesToSearch = googleTypes.slice(0, MAX_POI_TYPES_TO_SEARCH);
+  const prioritizedGoogleTypes = prioritizeGoogleTypesForSearch(
+    googleTypes,
+    selectedPoiTypes,
+  );
+  const typesToSearch = prioritizedGoogleTypes.slice(
+    0,
+    MAX_POI_TYPES_TO_SEARCH,
+  );
 
   console.log(
     "[poiService] Incoming sampled route points:",

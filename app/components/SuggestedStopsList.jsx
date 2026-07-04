@@ -11,61 +11,14 @@ import {
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { fetchGooglePlaceDetailsForStop } from "../services/googlePlaces";
-
-function asText(value, fallback = "") {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  return fallback;
-}
-
-function getStopId(stop) {
-  if (!stop) return undefined;
-
-  return (
-    stop.id ??
-    stop.place_id ??
-    stop.placeId ??
-    stop.googlePlaceId ??
-    stop.fsq_id ??
-    stop.properties?.place_id ??
-    stop.properties?.placeId ??
-    stop.properties?.googlePlaceId ??
-    stop.properties?.id ??
-    stop.name
-  );
-}
-
-function getStopTitle(stop) {
-  if (!stop) return "Unnamed stop";
-
-  return (
-    asText(stop.name) ||
-    asText(stop.title) ||
-    asText(stop.displayName?.text) ||
-    asText(stop.displayName) ||
-    "Unnamed stop"
-  );
-}
-
-function getStopCategory(stop) {
-  if (!stop) return "Suggested stop";
-
-  return stop.category ?? stop.type ?? stop.poiType ?? "Suggested stop";
-}
-
-function getStopAddress(stop) {
-  if (!stop) return "Address not available";
-
-  return (
-    stop.address ??
-    stop.formattedAddress ??
-    stop.formatted_address ??
-    stop.vicinity ??
-    stop.location?.address ??
-    stop.properties?.address ??
-    "Address not available"
-  );
-}
+import {
+  asText,
+  getDistanceOffRouteText,
+  getStopAddress,
+  getStopCategory,
+  getStopId,
+  getStopTitle,
+} from "../utils/stopUtils";
 
 function getStopDescription(stop) {
   if (!stop) return "No description available.";
@@ -96,25 +49,6 @@ function getStopImage(stop) {
     stop.imageUrls?.[0] ??
     null
   );
-}
-
-function getDistanceOffRouteText(stop) {
-  if (!stop) return "Distance off route unavailable";
-
-  const distanceMeters =
-    stop.closestRouteDistanceMeters ??
-    stop.distanceOffRouteMeters ??
-    stop.distanceFromRouteMeters;
-
-  if (typeof distanceMeters !== "number" || !Number.isFinite(distanceMeters)) {
-    return "Distance off route unavailable";
-  }
-
-  if (distanceMeters < 1000) {
-    return `${Math.round(distanceMeters)} m off route`;
-  }
-
-  return `${(distanceMeters / 1000).toFixed(1)} km off route`;
 }
 
 const SuggestedStopsList = ({
@@ -252,8 +186,8 @@ const SuggestedStopsList = ({
           className="flex-row items-center justify-between"
         >
           <View className="flex-1 pr-3">
-            <Text className="text-xl font-bold text-wn-forest">{title}</Text>
-            <Text className=" mt-1text-sm text-wn-text">
+            <Text className="text-xl font-bold text-emerald-950">{title}</Text>
+            <Text className="mt-1 text-sm text-stone-600">
               {resolvedStopCountLabel}
             </Text>
           </View>
@@ -265,13 +199,13 @@ const SuggestedStopsList = ({
           />
         </Pressable>
       ) : (
-        <Text className="text-xl font-bold text-wn-forest">{title}</Text>
+        <Text className="text-xl font-bold text-emerald-950">{title}</Text>
       )}
 
       {!isCollapsed && (
         <>
           {poiLoading && (
-            <Text className="mt-3 text-wn-text">
+            <Text className="mt-3 text-stone-600">
               Finding suggested stops near your route...
             </Text>
           )}
@@ -279,7 +213,7 @@ const SuggestedStopsList = ({
           {poiError && <Text className="mt-3 text-red-600">{poiError}</Text>}
 
           {!poiLoading && !poiError && safeSuggestedStops.length === 0 && (
-            <Text className="mt-3 text-wn-text">
+            <Text className="mt-3 text-stone-600">
               {totalSuggestedStopCount > 0 ? allSelectedMessage : emptyMessage}
             </Text>
           )}
@@ -298,29 +232,29 @@ const SuggestedStopsList = ({
                   onPress={() => handleOpenStopDetails(stop)}
                   className={`mt-3 rounded-xl border p-3 ${
                     selected
-                      ? "border-wn-forest bg-wn-green-50"
-                      : "border-wn-border bg-white"
+                      ? "border-emerald-800 bg-emerald-50"
+                      : "border-stone-200 bg-white"
                   }`}
                 >
                   <View className="flex-row items-start justify-between">
                     <View className="flex-1 pr-3">
-                      <Text className="font-semibold text-wn-charcoal">
+                      <Text className="font-semibold text-stone-900">
                         {index + 1}. {getStopTitle(stop)}
                       </Text>
 
-                      <Text className="mt-1 text-sm text-wn-text">
+                      <Text className="mt-1 text-sm text-stone-600">
                         {getStopCategory(stop)}
                       </Text>
 
-                      <Text className="mt-1 text-sm text-wn-text">
+                      <Text className="mt-1 text-sm text-stone-600">
                         {getStopAddress(stop)}
                       </Text>
 
-                      <Text className="mt-1 text-sm font-medium text-wn-forest">
+                      <Text className="mt-1 text-sm font-medium text-emerald-950">
                         {getDistanceOffRouteText(stop)}
                       </Text>
 
-                      <Text className="mt-2 text-xs text-wn-text">
+                      <Text className="mt-2 text-xs text-stone-600">
                         Tap for photos and details
                       </Text>
                     </View>
@@ -331,12 +265,12 @@ const SuggestedStopsList = ({
                         onToggleStop(stop);
                       }}
                       className={`rounded-full px-3 py-1 ${
-                        selected ? "bg-wn-forest" : "bg-wn-green-50"
+                        selected ? "bg-emerald-800" : "bg-emerald-50"
                       }`}
                     >
                       <Text
                         className={`text-sm font-semibold ${
-                          selected ? "text-white" : "text-wn-forest"
+                          selected ? "text-white" : "text-emerald-950"
                         }`}
                       >
                         {selected ? "Remove" : "Add"}
@@ -369,7 +303,7 @@ const SuggestedStopsList = ({
                       <Image
                         key={`${imageUrl}-${index}`}
                         source={{ uri: imageUrl }}
-                        className="mr-3 h-48 w-72 rounded-2xl bg-wn-green-50"
+                        className="mr-3 h-48 w-72 rounded-2xl bg-emerald-50"
                         resizeMode="cover"
                       />
                     ))}
@@ -377,21 +311,23 @@ const SuggestedStopsList = ({
                 ) : modalImageUrl ? (
                   <Image
                     source={{ uri: modalImageUrl }}
-                    className="h-48 w-full rounded-2xl bg-wn-green-50"
+                    className="h-48 w-full rounded-2xl bg-emerald-50"
                     resizeMode="cover"
                   />
                 ) : (
-                  <View className="h-32 w-full items-center justify-center rounded-2xl bg-wn-green-50">
+                  <View className="h-32 w-full items-center justify-center rounded-2xl bg-emerald-50">
                     {detailsLoading ? (
                       <ActivityIndicator />
                     ) : (
-                      <Text className="text-wn-text">No image available</Text>
+                      <Text className="text-stone-600">
+                        No image available
+                      </Text>
                     )}
                   </View>
                 )}
 
                 {detailsLoading && (
-                  <Text className="mt-3 text-sm text-wn-text">
+                  <Text className="mt-3 text-sm text-stone-600">
                     Loading extra stop details...
                   </Text>
                 )}
@@ -402,20 +338,20 @@ const SuggestedStopsList = ({
                   </Text>
                 )}
 
-                <Text className="mt-4 text-2xl font-bold text-wn-forest">
+                <Text className="mt-4 text-2xl font-bold text-emerald-950">
                   {modalTitle}
                 </Text>
 
-                <Text className="mt-2 text-base font-semibold text-wn-charcoal">
+                <Text className="mt-2 text-base font-semibold text-stone-900">
                   {getStopCategory(activeStop)}
                 </Text>
 
-                <Text className="mt-3 text-base text-wn-text">
+                <Text className="mt-3 text-base text-stone-600">
                   {modalAddress}
                 </Text>
 
                 {modalRating && (
-                  <Text className="mt-2 text-sm text-wn-text">
+                  <Text className="mt-2 text-sm text-stone-600">
                     Rating: {modalRating} / 5
                     {modalUserRatingCount
                       ? ` · ${modalUserRatingCount} reviews`
@@ -423,15 +359,15 @@ const SuggestedStopsList = ({
                   </Text>
                 )}
 
-                <Text className="mt-3 text-base font-semibold text-wn-forest">
+                <Text className="mt-3 text-base font-semibold text-emerald-950">
                   {getDistanceOffRouteText(activeStop)}
                 </Text>
 
-                <Text className="mt-5 text-lg font-bold text-wn-charcoal">
+                <Text className="mt-5 text-lg font-bold text-stone-900">
                   About this stop
                 </Text>
 
-                <Text className="mt-2 text-base leading-6 text-wn-text">
+                <Text className="mt-2 text-base leading-6 text-stone-600">
                   {modalDescription}
                 </Text>
 
@@ -439,14 +375,14 @@ const SuggestedStopsList = ({
                   <Pressable
                     onPress={handleAddStopFromModal}
                     className={`flex-1 rounded-xl px-4 py-3 ${
-                      activeStopIsSelected ? "bg-wn-border" : "bg-wn-green-50"
+                      activeStopIsSelected ? "bg-stone-200" : "bg-emerald-50"
                     }`}
                   >
                     <Text
                       className={`text-center font-bold ${
                         activeStopIsSelected
-                          ? "text-wn-charcoal"
-                          : "text-wn-forest"
+                          ? "text-stone-900"
+                          : "text-emerald-950"
                       }`}
                     >
                       {activeStopIsSelected ? "Already Added" : "Add Stop"}
@@ -455,9 +391,9 @@ const SuggestedStopsList = ({
 
                   <Pressable
                     onPress={closeModal}
-                    className="flex-1 rounded-xl bg-wn-border px-4 py-3"
+                    className="flex-1 rounded-xl bg-stone-200 px-4 py-3"
                   >
-                    <Text className="text-center font-bold text-wn-charcoal">
+                    <Text className="text-center font-bold text-stone-900">
                       Close
                     </Text>
                   </Pressable>

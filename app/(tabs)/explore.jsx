@@ -1,24 +1,38 @@
 import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
   Text,
   View,
 } from "react-native";
-import * as Location from "expo-location";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import AutocompleteInput from "../components/AutoCompleteInput";
 import WNButton from "../components/WNButton";
 import StopCountDropdown from "../components/StopCountDropdown";
 import POITypeSelector from "../components/POITypeSelector";
+import ScreenIntroCard from "../components/ScreenIntroCard";
+import CurrentLocationToggle from "../components/CurrentLocationToggle";
+import RouteBuildingScreen from "../components/RouteBuildingScreen";
+import WNTransportSelector from "../components/WNTransportSelector";
+import PremiumFeatureCard from "../components/PremiumFeatureCard";
 
 import { buildGoogleRoute } from "../services/googleRoutes";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
+import { useEntitlementStore } from "../store/useEntitlementStore";
+import {
+  FEATURES,
+  canUseFeature,
+  getPremiumFeatureMessage,
+} from "../config/featureAccess";
+import { isValidCoords } from "../utils/coordinates";
+import {
+  geocodeAddress,
+  getCurrentLocationWithLabel,
+} from "../services/locationService";
 
 const DIRECTIONS = [
   {
@@ -53,25 +67,25 @@ const DIRECTIONS = [
 
 const DRIVE_TIME_OPTIONS = [30, 45, 60, 90, 120, 180];
 
-const AVERAGE_DRIVE_SPEED_KMH = 70;
+const EXPLORE_TRANSPORT_OPTIONS = [
+  { key: "driving", label: "Drive", icon: "car" },
+  { key: "bicycling", label: "Bike", icon: "bike" },
+  { key: "walking", label: "Walk", icon: "walk" },
+  {
+    key: "transit",
+    label: "Transit",
+    icon: "train",
+    disabled: true,
+  },
+];
 
-async function geocodeAddress(address) {
-  if (!address?.trim()) return null;
-
-  try {
-    const results = await Location.geocodeAsync(address.trim());
-
-    if (!results?.length) return null;
-
-    return {
-      latitude: results[0].latitude,
-      longitude: results[0].longitude,
-    };
-  } catch (error) {
-    console.log("Explore geocode error:", error);
-    return null;
-  }
-}
+const AVERAGE_SPEED_BY_MODE_KMH = {
+  driving: 70,
+  bicycling: 18,
+  walking: 5,
+  transit: 35,
+};
+const MAX_EXPLORE_CANDIDATES = 25;
 
 function parseGoogleDurationSeconds(durationString) {
   if (typeof durationString !== "string") return null;
@@ -85,20 +99,23 @@ function getExploreDestinationCandidates({
   startCoords,
   bearingDegrees,
   baseDistanceKm,
+  targetTravelTimeMinutes,
 }) {
   /**
    * Explore should mean "north-ish", "south-ish", etc.
    *
    * If exact north lands in water or wilderness, we try slight angles around it.
    */
-  const bearingOffsets = [0, -15, 15, -30, 30, -45, 45, -60, 60, -75, 75];
+  const bearingOffsets = [0, -15, 15, -30, 30];
 
   /**
-   * For long Explore trips, especially around lakes, we need to test farther
-   * distances. A 3-hour route may require a destination much farther away than
-   * the first straight-line estimate.
+   * Longer trips keep farther-distance options for regions where roads must
+   * travel around lakes or other geographic barriers.
    */
-  const distanceMultipliers = [1, 0.85, 0.7, 1.15, 1.3, 1.45, 1.6];
+  const distanceMultipliers =
+    targetTravelTimeMinutes >= 90
+      ? [1, 0.85, 1.15, 1.35, 1.55]
+      : [1, 0.85, 1.15, 0.7, 1.3];
 
   const candidates = [];
 
@@ -119,7 +136,7 @@ function getExploreDestinationCandidates({
     }
   }
 
-  return candidates;
+  return candidates.slice(0, MAX_EXPLORE_CANDIDATES);
 }
 
 function getSmallestBearingDifferenceDegrees(a, b) {
@@ -129,10 +146,10 @@ function getSmallestBearingDifferenceDegrees(a, b) {
   return difference;
 }
 
-function getAcceptableDurationDeltaSeconds(targetDriveTimeMinutes) {
-  if (targetDriveTimeMinutes <= 45) return 8 * 60;
-  if (targetDriveTimeMinutes <= 90) return 12 * 60;
-  if (targetDriveTimeMinutes <= 120) return 15 * 60;
+function getAcceptableDurationDeltaSeconds(targetTravelTimeMinutes) {
+  if (targetTravelTimeMinutes <= 45) return 8 * 60;
+  if (targetTravelTimeMinutes <= 90) return 12 * 60;
+  if (targetTravelTimeMinutes <= 120) return 15 * 60;
 
   return 18 * 60;
 }
@@ -176,15 +193,17 @@ function scoreExploreCandidate({
 async function findBestExploreDestination({
   startCoords,
   directionConfig,
-  targetDriveTimeMinutes,
+  targetTravelTimeMinutes,
   estimatedStraightLineDistanceKm,
+  travelMode,
 }) {
-  const targetDurationSeconds = targetDriveTimeMinutes * 60;
+  const targetDurationSeconds = targetTravelTimeMinutes * 60;
 
   const candidates = getExploreDestinationCandidates({
     startCoords,
     bearingDegrees: directionConfig.bearingDegrees,
     baseDistanceKm: estimatedStraightLineDistanceKm,
+    targetTravelTimeMinutes,
   });
 
   const successfulCandidates = [];
@@ -200,7 +219,7 @@ async function findBestExploreDestination({
       const routePreview = await buildGoogleRoute({
         startingCoords: startCoords,
         destinationCoords: candidate.coords,
-        travelMode: "driving",
+        travelMode,
       });
 
       const durationSeconds = parseGoogleDurationSeconds(routePreview.duration);
@@ -252,7 +271,7 @@ async function findBestExploreDestination({
        * AND still respects the requested direction
        */
       const acceptableDurationDeltaSeconds = getAcceptableDurationDeltaSeconds(
-        targetDriveTimeMinutes,
+        targetTravelTimeMinutes,
       );
 
       if (
@@ -278,7 +297,7 @@ async function findBestExploreDestination({
 
   /**
    * If no candidate was close enough, use the successful one closest to
-   * the requested drive time.
+   * the requested travel time.
    */
   return [...successfulCandidates].sort((a, b) => {
     return a.candidateScore - b.candidateScore;
@@ -290,10 +309,10 @@ async function findBestExploreDestination({
  *
  * Example:
  * - User chooses 60 minutes.
- * - Estimated road distance at 70 km/h is 70 km.
- * - Straight-line target becomes 70 * 0.65 = 45.5 km.
+ * - The selected travel mode provides an estimated average speed.
+ * - The estimated travel distance is reduced by the straight-line factor.
  *
- * This gives Google Routes enough space to create a real road route without
+ * This gives Google Routes enough space to create a real route without
  * wildly overshooting the user's time budget.
  */
 const STRAIGHT_LINE_ROUTE_FACTOR = 0.65;
@@ -347,16 +366,6 @@ function getDestinationFromBearing({
     latitude: toDegrees(destinationLatitude),
     longitude: normalizeLongitude(toDegrees(destinationLongitude)),
   };
-}
-
-function isValidCoords(coords) {
-  return (
-    coords &&
-    typeof coords.latitude === "number" &&
-    typeof coords.longitude === "number" &&
-    Number.isFinite(coords.latitude) &&
-    Number.isFinite(coords.longitude)
-  );
 }
 
 function DirectionSelector({ value, onChange }) {
@@ -423,7 +432,7 @@ function DriveTimeSelector({ value, onChange }) {
   return (
     <View className="mt-5">
       <Text className="mb-2 ml-2 text-sm font-semibold text-white">
-        How long are you willing to drive?
+        How long are you willing to travel?
       </Text>
 
       <View className="flex-row flex-wrap gap-3">
@@ -463,24 +472,38 @@ const Explore = () => {
   const {
     startingAddress,
     startingCoords,
+    selectedTravelMode,
     numStops,
     selectedPoiTypes,
 
     setStartingAddress,
-    setDestinationAddress,
     setStartingCoords,
-    setDestinationCoords,
     setSelectedTravelMode,
     setNumStops,
     setSelectedPoiTypes,
+    setActiveRouteRequest,
     resetRoutePlanner,
   } = useRoutePlannerStore();
+  const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
 
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [locating, setLocating] = useState(false);
   const [selectedDirection, setSelectedDirection] = useState("north");
   const [driveTimeMinutes, setDriveTimeMinutes] = useState(60);
   const [buildingAdventure, setBuildingAdventure] = useState(false);
+  const [showExplorePaywall, setShowExplorePaywall] = useState(false);
+
+  const canUseExplore = canUseFeature(
+    subscriptionTier,
+    FEATURES.EXPLORE,
+  );
+  const explorePremiumCopy = getPremiumFeatureMessage(FEATURES.EXPLORE);
+
+  useEffect(() => {
+    if (selectedTravelMode === "transit") {
+      setSelectedTravelMode("driving");
+    }
+  }, [selectedTravelMode, setSelectedTravelMode]);
 
   const selectedDirectionConfig = useMemo(() => {
     return (
@@ -490,50 +513,42 @@ const Explore = () => {
   }, [selectedDirection]);
 
   const estimatedStraightLineDistanceKm = useMemo(() => {
-    const estimatedRoadDistanceKm =
-      (driveTimeMinutes / 60) * AVERAGE_DRIVE_SPEED_KMH;
+    const selectedAverageSpeedKmh =
+      AVERAGE_SPEED_BY_MODE_KMH[selectedTravelMode] ??
+      AVERAGE_SPEED_BY_MODE_KMH.driving;
+    const estimatedTravelDistanceKm =
+      (driveTimeMinutes / 60) * selectedAverageSpeedKmh;
 
-    return estimatedRoadDistanceKm * STRAIGHT_LINE_ROUTE_FACTOR;
-  }, [driveTimeMinutes]);
+    return estimatedTravelDistanceKm * STRAIGHT_LINE_ROUTE_FACTOR;
+  }, [driveTimeMinutes, selectedTravelMode]);
 
   async function getCurrentLocation() {
     try {
       setLocating(true);
       setStartingAddress("Getting your location...");
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const result = await getCurrentLocationWithLabel();
 
-      if (status !== "granted") {
-        Alert.alert(
-          "Location permission needed",
-          "Please allow location access to use your current location.",
-        );
+      if (!result.ok) {
+        if (result.reason === "permission-denied") {
+          Alert.alert(
+            "Location permission needed",
+            "Please allow location access to use your current location.",
+          );
+        } else {
+          Alert.alert(
+            "Location error",
+            "Unable to get your current location. Please try again or enter a starting point.",
+          );
+        }
 
         setStartingAddress("");
         setStartingCoords(null);
         return false;
       }
 
-      const position = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = position.coords;
-
-      const geo = await Location.reverseGeocodeAsync({
-        latitude,
-        longitude,
-      });
-
-      const firstResult = geo?.[0];
-
-      const city =
-        firstResult?.city ||
-        firstResult?.subregion ||
-        firstResult?.region ||
-        "Current Location";
-
-      const region = firstResult?.region || "";
-
-      setStartingAddress(region ? `${city}, ${region}` : city);
-      setStartingCoords({ latitude, longitude });
+      setStartingAddress(result.addressLabel);
+      setStartingCoords(result.coords);
 
       return true;
     } catch (error) {
@@ -553,6 +568,11 @@ const Explore = () => {
   }
 
   async function handleFindAdventure() {
+    if (!canUseExplore) {
+      setShowExplorePaywall(true);
+      return;
+    }
+
     try {
       setBuildingAdventure(true);
 
@@ -575,14 +595,15 @@ const Explore = () => {
       const adventureDestination = await findBestExploreDestination({
         startCoords: finalStartCoords,
         directionConfig: selectedDirectionConfig,
-        targetDriveTimeMinutes: driveTimeMinutes,
+        targetTravelTimeMinutes: driveTimeMinutes,
         estimatedStraightLineDistanceKm,
+        travelMode: selectedTravelMode,
       });
 
       if (!adventureDestination?.coords) {
         Alert.alert(
           "Adventure route error",
-          `Unable to find a routable ${selectedDirectionConfig.label.toLowerCase()} adventure from this starting point. Try a shorter drive time or a different direction.`,
+          `Unable to find a routable ${selectedDirectionConfig.label.toLowerCase()} adventure from this starting point. Try a shorter travel time or a different direction.`,
         );
         return;
       }
@@ -598,10 +619,16 @@ const Explore = () => {
         startingAddress || "your start"
       }`;
 
-      setDestinationAddress(destinationLabel);
-      setDestinationCoords(adventureDestinationCoords);
-
-      setSelectedTravelMode("driving");
+      setActiveRouteRequest({
+        source: "explore",
+        startingAddress,
+        destinationAddress: destinationLabel,
+        startingCoords: finalStartCoords,
+        destinationCoords: adventureDestinationCoords,
+        travelMode: selectedTravelMode,
+        numStops,
+        selectedPoiTypes,
+      });
 
       router.push({
         pathname: "/(screens)/route",
@@ -617,8 +644,18 @@ const Explore = () => {
   function handleReset() {
     resetRoutePlanner();
     setUseCurrentLocation(false);
+    setSelectedTravelMode("driving");
     setSelectedDirection("north");
     setDriveTimeMinutes(60);
+  }
+
+  if (buildingAdventure) {
+    return (
+      <RouteBuildingScreen
+        title="Finding your adventure"
+        message="Searching for a destination that matches your direction and travel time."
+      />
+    );
   }
 
   return (
@@ -627,15 +664,10 @@ const Explore = () => {
       contentContainerStyle={{ paddingBottom: 40 }}
     >
       <View className="px-2 pt-4">
-        <View className="mb-5 rounded-3xl bg-white/10 px-4 py-5">
-          <Text className="text-3xl font-bold text-white">Explore</Text>
-
-          <Text className="mt-2 text-base leading-6 text-white/80">
-            Pick a starting point, choose a direction, set a drive-time budget,
-            and Wander North will build a route with possible stops along the
-            way.
-          </Text>
-        </View>
+        <ScreenIntroCard
+          title="Explore"
+          description="Pick a starting point, choose a direction, set a travel-time budget, and Wander North will build a route with possible stops along the way."
+        />
 
         <AutocompleteInput
           label="Starting Point"
@@ -654,42 +686,39 @@ const Explore = () => {
           }}
         />
 
-        <View className="mb-2 flex-row items-center justify-between px-2">
-          <Text className="text-text-primary">
-            {useCurrentLocation
-              ? "Using current location"
-              : "Use current location"}
+        <CurrentLocationToggle
+          useCurrentLocation={useCurrentLocation}
+          locating={locating}
+          onPress={async () => {
+            if (useCurrentLocation) {
+              setUseCurrentLocation(false);
+              setStartingAddress("");
+              setStartingCoords(null);
+              return;
+            }
+
+            const ok = await getCurrentLocation();
+
+            if (ok) {
+              setUseCurrentLocation(true);
+            }
+          }}
+        />
+
+        <View className="mt-5">
+          <Text className="mb-2 ml-2 text-sm font-semibold text-white">
+            Choose how you are traveling
           </Text>
 
-          <Pressable
-            onPress={async () => {
-              if (useCurrentLocation) {
-                setUseCurrentLocation(false);
-                setStartingAddress("");
-                setStartingCoords(null);
-                return;
-              }
+          <WNTransportSelector
+            value={selectedTravelMode}
+            onChange={setSelectedTravelMode}
+            options={EXPLORE_TRANSPORT_OPTIONS}
+          />
 
-              const ok = await getCurrentLocation();
-
-              if (ok) {
-                setUseCurrentLocation(true);
-              }
-            }}
-            className={`h-11 w-11 items-center justify-center rounded-full ${
-              useCurrentLocation ? "bg-emerald-700" : "bg-white/15"
-            }`}
-          >
-            {locating ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <MaterialCommunityIcons
-                name={useCurrentLocation ? "crosshairs-gps" : "crosshairs"}
-                size={24}
-                color="white"
-              />
-            )}
-          </Pressable>
+          <Text className="ml-2 mt-1 text-xs text-white/70">
+            Transit adventures are unavailable until a destination is known.
+          </Text>
         </View>
 
         <DirectionSelector
@@ -711,7 +740,7 @@ const Explore = () => {
             {selectedDirectionConfig.label}, about {driveTimeMinutes} minutes
             away. The generated destination is roughly{" "}
             {estimatedStraightLineDistanceKm.toFixed(1)} km as the crow flies,
-            then Google builds the real road route.
+            then Google builds the real route.
           </Text>
         </View>
 
@@ -726,6 +755,19 @@ const Explore = () => {
         <View className="mt-5">
           <StopCountDropdown value={numStops} onChange={setNumStops} />
         </View>
+
+        {showExplorePaywall && (
+          <PremiumFeatureCard
+            title={explorePremiumCopy.title}
+            message={explorePremiumCopy.message}
+            onClose={() => setShowExplorePaywall(false)}
+            showDevToggle
+            onEnablePremiumForTesting={() => {
+              setPremiumForTesting(true);
+              setShowExplorePaywall(false);
+            }}
+          />
+        )}
 
         <View className="mt-8 gap-4">
           <WNButton
@@ -744,6 +786,7 @@ const Explore = () => {
           />
         </View>
       </View>
+
     </ScrollView>
   );
 };

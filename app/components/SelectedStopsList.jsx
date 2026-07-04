@@ -1,59 +1,28 @@
 import { Pressable, Text, View } from "react-native";
-
-function getStopId(stop) {
-  if (!stop) return undefined;
-
-  return (
-    stop.id ??
-    stop.place_id ??
-    stop.fsq_id ??
-    stop.properties?.place_id ??
-    stop.properties?.id ??
-    stop.name
-  );
-}
-
-function getStopTitle(stop) {
-  if (!stop) return "Unnamed stop";
-
-  return stop.name ?? stop.title ?? "Unnamed stop";
-}
-
-function getStopCategory(stop) {
-  if (!stop) return "Suggested stop";
-
-  return stop.category ?? stop.type ?? stop.poiType ?? "Suggested stop";
-}
-
-function getStopAddress(stop) {
-  if (!stop) return "Address not available";
-
-  return (
-    stop.address ??
-    stop.formattedAddress ??
-    stop.vicinity ??
-    stop.location?.address ??
-    "Address not available"
-  );
-}
+import {
+  getStopAddress,
+  getStopCategory,
+  getStopId,
+  getStopTitle,
+} from "../utils/stopUtils";
 
 export default function SelectedStopsList({
   selectedStops = [],
   onRemoveStop,
   onRemoveAllStops,
+  emptyMessage = "No stops selected yet. Add suggested or custom stops to customize your route.",
 }) {
   return (
     <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
       <View
         className={`${selectedStops.length > 0 ? "flex-row items-center justify-between" : ""}`}
       >
-        <Text className="text-xl font-bold text-wn-forest">Selected Stops</Text>
+        <Text className="text-xl font-bold text-emerald-950">
+          Selected Stops
+        </Text>
 
         {selectedStops.length === 0 && (
-          <Text className="mt-3 text-wn-text">
-            No stops selected yet. Add a few suggested stops to customize your
-            route.
-          </Text>
+          <Text className="mt-3 text-stone-600">{emptyMessage}</Text>
         )}
 
         {selectedStops.length > 0 && (
@@ -74,19 +43,19 @@ export default function SelectedStopsList({
         return (
           <View
             key={stopId ?? `${getStopTitle(stop)}-${index}`}
-            className="mt-3 rounded-xl border border-wn-border bg-wn-green-50 p-3"
+            className="mt-3 rounded-xl border border-stone-200 bg-emerald-50 p-3"
           >
             <View className="flex-row items-start justify-between">
               <View className="flex-1 pr-3">
-                <Text className="font-semibold text-wn-charcoal">
+                <Text className="font-semibold text-stone-900">
                   {index + 1}. {getStopTitle(stop)}
                 </Text>
 
-                <Text className="mt-1 text-sm text-wn-text">
+                <Text className="mt-1 text-sm text-stone-600">
                   {getStopCategory(stop)}
                 </Text>
 
-                <Text className="mt-1 text-sm text-wn-text">
+                <Text className="mt-1 text-sm text-stone-600">
                   {getStopAddress(stop)}
                 </Text>
               </View>

@@ -46,6 +46,9 @@ export const useRoutePlannerStore = create((set) => ({
   // An empty array means no filter — all POI types are considered.
   selectedPoiTypes: [],
 
+  // Snapshot of the most recently submitted route request.
+  activeRouteRequest: null,
+
   // ---------------------------------------------------------------------------
   // Actions
   // Each action is a thin wrapper around Zustand's `set` function which merges
@@ -75,6 +78,10 @@ export const useRoutePlannerStore = create((set) => ({
   // Replace the entire list of selected POI type filters
   setSelectedPoiTypes: (selectedPoiTypes) => set({ selectedPoiTypes }),
 
+  setActiveRouteRequest: (activeRouteRequest) => set({ activeRouteRequest }),
+
+  clearActiveRouteRequest: () => set({ activeRouteRequest: null }),
+
   // ---------------------------------------------------------------------------
   // resetRoutePlanner
   // ---------------------------------------------------------------------------
@@ -91,5 +98,6 @@ export const useRoutePlannerStore = create((set) => ({
       selectedTravelMode: "driving",
       numStops: 3,
       selectedPoiTypes: [],
+      activeRouteRequest: null,
     }),
 }));

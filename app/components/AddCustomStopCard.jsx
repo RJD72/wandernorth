@@ -3,22 +3,16 @@ import { Text, View } from "react-native";
 
 import AutocompleteInput from "./AutoCompleteInput";
 import WNButton from "./WNButton";
+import { isValidCoords } from "../utils/coordinates";
 
-function isValidCoords(coords) {
-  return (
-    coords &&
-    typeof coords.latitude === "number" &&
-    typeof coords.longitude === "number" &&
-    Number.isFinite(coords.latitude) &&
-    Number.isFinite(coords.longitude)
-  );
-}
-
-export default function AddCustomStopCard({ onAddStop = () => {} }) {
+export default function AddCustomStopCard({
+  onAddStop = () => {},
+  locationBias,
+  customSearchPoints = [],
+}) {
   const [customStopAddress, setCustomStopAddress] = useState("");
   const [customStopCoords, setCustomStopCoords] = useState(null);
   const [error, setError] = useState(null);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   function handleAddCustomStop() {
     if (!customStopAddress.trim()) {
@@ -53,9 +47,11 @@ export default function AddCustomStopCard({ onAddStop = () => {} }) {
       style={{ zIndex: 1000, elevation: 1000, position: "relative" }}
       className="my-4 rounded-2xl bg-white p-4 shadow-sm"
     >
-      <Text className="text-xl font-bold text-wn-forest">Add Custom Stop</Text>
+      <Text className="text-xl font-bold text-emerald-950">
+        Add Custom Stop
+      </Text>
 
-      <Text className="mt-1 text-sm text-wn-text">
+      <Text className="mt-1 text-sm text-stone-600">
         Search for a place, address, town, or landmark and add it to your route.
       </Text>
 
@@ -64,7 +60,11 @@ export default function AddCustomStopCard({ onAddStop = () => {} }) {
           label="Custom stop"
           value={customStopAddress}
           placeholder="Search a stop to add"
-          onDropdownVisibleChange={setDropdownOpen}
+          autocompleteTypes={null}
+          locationBias={locationBias}
+          strictBounds={false}
+          dropdownMode="inline"
+          customSearchPoints={customSearchPoints}
           onChangeText={(text) => {
             setCustomStopAddress(text);
             setCustomStopCoords(null);
@@ -77,8 +77,6 @@ export default function AddCustomStopCard({ onAddStop = () => {} }) {
           }}
         />
       </View>
-
-      {dropdownOpen && <View style={{ height: 250 }} />}
 
       {error && <Text className="mt-2 text-sm text-red-600">{error}</Text>}
 

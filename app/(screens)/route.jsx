@@ -1,7 +1,14 @@
-import { View, Text, ActivityIndicator, ScrollView } from "react-native";
-import { useRouter } from "expo-router";
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  ScrollView,
+  Linking,
+} from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import polyline from "@mapbox/polyline";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import MapComponent from "../components/MapComponent";
 import RouteSummaryCard from "../components/RouteSummaryCard";
@@ -9,45 +16,80 @@ import SuggestedStopsList from "../components/SuggestedStopsList";
 import WNButton from "../components/WNButton";
 import SelectedStopsList from "../components/SelectedStopsList";
 import AddCustomStopCard from "../components/AddCustomStopCard";
+import PremiumFeatureCard from "../components/PremiumFeatureCard";
 
 import { buildGoogleRoute } from "../services/googleRoutes";
-import { fetchPoisNearRoutePoints } from "../services/poiService";
+import {
+  fetchPoisNearRoutePoints,
+  normalizeSelectedPoiTypes,
+} from "../services/poiService";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
+import { useEntitlementStore } from "../store/useEntitlementStore";
+import {
+  FEATURES,
+  getFeatureLimits,
+  getPremiumFeatureMessage,
+} from "../config/featureAccess";
 
 import { getSamplePointsAlongRoute } from "../utils/routeSampling";
 import { attachRoutePositionToPois } from "../utils/routeDistance";
 import { chooseDistributedStops } from "../utils/poiScoring";
+import { isValidCoords } from "../utils/coordinates";
+import { getStopCoords, getStopId } from "../utils/stopUtils";
+import { MAX_DISTANCE_FROM_ROUTE_METERS } from "../utils/poiDistancePolicy";
 
-function getStopId(stop) {
+const EMPTY_SELECTED_POI_TYPES = [];
+
+function isCustomStop(stop) {
   return (
-    stop.id ??
-    stop.place_id ??
-    stop.fsq_id ??
-    stop.properties?.place_id ??
-    stop.properties?.id ??
-    stop.name
+    stop?.source === "custom" ||
+    stop?.category === "Custom Stop" ||
+    String(stop?.id || "").startsWith("custom-")
   );
 }
 
-function getStopCoords(stop) {
-  if (!stop) return null;
+function getCustomStopCount(stops = []) {
+  return stops.filter(isCustomStop).length;
+}
 
-  const latitude =
-    stop.latitude ?? stop.location?.latitude ?? stop.location?.lat;
-  const longitude =
-    stop.longitude ?? stop.location?.longitude ?? stop.location?.lng;
+function formatCoordinatesForGoogleMaps(coords) {
+  return `${coords.latitude},${coords.longitude}`;
+}
 
-  if (
-    typeof latitude !== "number" ||
-    typeof longitude !== "number" ||
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude)
-  ) {
-    return null;
+function buildGoogleMapsDirectionsUrl({
+  origin,
+  destination,
+  selectedStops = [],
+  travelMode,
+}) {
+  const sortedStops = [...selectedStops].sort((a, b) => {
+    const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
+    const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
+
+    return aProgress - bProgress;
+  });
+
+  const waypoints = sortedStops
+    .map(getStopCoords)
+    .filter(Boolean)
+    .map(formatCoordinatesForGoogleMaps)
+    .join("|");
+
+  const queryParams = [
+    "api=1",
+    `origin=${encodeURIComponent(formatCoordinatesForGoogleMaps(origin))}`,
+    `destination=${encodeURIComponent(
+      formatCoordinatesForGoogleMaps(destination),
+    )}`,
+    `travelmode=${encodeURIComponent(travelMode)}`,
+  ];
+
+  if (waypoints) {
+    queryParams.push(`waypoints=${encodeURIComponent(waypoints)}`);
   }
 
-  return { latitude, longitude };
+  return `https://www.google.com/maps/dir/?${queryParams.join("&")}`;
 }
 
 function formatCategoryTitle(category) {
@@ -93,36 +135,70 @@ const Route = () => {
   const [finalRouteData, setFinalRouteData] = useState(null);
   const [finalRouteLoading, setFinalRouteLoading] = useState(false);
   const [finalRouteError, setFinalRouteError] = useState(null);
+  const [premiumGate, setPremiumGate] = useState(null);
 
-  // Route planning inputs are sourced from a shared Zustand store.
-  // This screen assumes those values were collected on previous steps.
-  const {
-    startingAddress,
-    destinationAddress,
-    startingCoords,
-    destinationCoords,
-    selectedTravelMode,
-    numStops,
-    selectedPoiTypes,
-  } = useRoutePlannerStore();
+  const { activeRouteRequest } = useRoutePlannerStore();
+  const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
+  const routeRequest = activeRouteRequest;
+  const numStops = routeRequest?.numStops ?? 3;
+  const parsedStopCount = Number(numStops);
+  const noAutoStopsRequested =
+    Number.isFinite(parsedStopCount) && parsedStopCount === 0;
+  const selectedPoiTypes =
+    routeRequest?.selectedPoiTypes ?? EMPTY_SELECTED_POI_TYPES;
+  const featureLimits = getFeatureLimits(subscriptionTier);
+  const maxSuggestedStops = featureLimits.maxSuggestedStops;
+  const maxCustomStops = featureLimits.maxCustomStops;
+  const moreStopsPremiumCopy = getPremiumFeatureMessage(
+    FEATURES.MORE_AUTOMATIC_STOPS,
+  );
+  const customStopsPremiumCopy = getPremiumFeatureMessage(
+    FEATURES.MULTIPLE_CUSTOM_STOPS,
+  );
 
   const router = useRouter();
+  const { returnTo } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
 
-  const isValidCoord = (coord) => {
-    return (
-      coord &&
-      typeof coord.latitude === "number" &&
-      typeof coord.longitude === "number" &&
-      Number.isFinite(coord.latitude) &&
-      Number.isFinite(coord.longitude)
-    );
-  };
+  function closePremiumGate() {
+    setPremiumGate(null);
+  }
+
+  function enablePremiumForTesting() {
+    setPremiumForTesting(true);
+    setPremiumGate(null);
+  }
+
+  function isAtSelectedStopLimit(stops = []) {
+    return stops.length >= maxSuggestedStops;
+  }
+
+  function handleEditRoute() {
+    if (typeof returnTo === "string") {
+      router.replace(returnTo);
+      return;
+    }
+
+    router.replace("/(tabs)/navigate");
+  }
+
+  async function handleOpenInGoogleMaps() {
+    const url = buildGoogleMapsDirectionsUrl({
+      origin: routeData.parsedParams.startingCoords,
+      destination: routeData.parsedParams.destinationCoords,
+      selectedStops,
+      travelMode: routeData.parsedParams.travelMode,
+    });
+
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      console.log("Open Google Maps error:", error);
+    }
+  }
 
   function toggleSelectedStop(stop) {
     const stopId = getStopId(stop);
-
-    setFinalRouteData(null);
-    setFinalRouteError(null);
 
     setSelectedStops((currentStops) => {
       const alreadySelected = currentStops.some((currentStop) => {
@@ -130,10 +206,21 @@ const Route = () => {
       });
 
       if (alreadySelected) {
+        setFinalRouteData(null);
+        setFinalRouteError(null);
+
         return currentStops.filter((currentStop) => {
           return getStopId(currentStop) !== stopId;
         });
       }
+
+      if (isAtSelectedStopLimit(currentStops)) {
+        setPremiumGate("moreStops");
+        return currentStops;
+      }
+
+      setFinalRouteData(null);
+      setFinalRouteError(null);
 
       return [...currentStops, stop];
     });
@@ -143,6 +230,7 @@ const Route = () => {
     setFinalRouteData(null);
     setFinalRouteError(null);
     setSelectedStops([]);
+    setPremiumGate(null);
   }
 
   function handleAddCustomStop(customStop) {
@@ -150,6 +238,18 @@ const Route = () => {
 
     if (!routeData?.routeCoords?.length) {
       setFinalRouteError("Route data is not ready yet. Please try again");
+      return;
+    }
+
+    const currentCustomStopCount = getCustomStopCount(selectedStops);
+
+    if (currentCustomStopCount >= maxCustomStops) {
+      setPremiumGate("customStops");
+      return;
+    }
+
+    if (isAtSelectedStopLimit(selectedStops)) {
+      setPremiumGate("moreStops");
       return;
     }
 
@@ -228,10 +328,15 @@ const Route = () => {
         setSuggestedStops([]);
         setSelectedStops([]);
         setAllRoutePois([]);
+        setPremiumGate(null);
 
         // Guard clause: route computation requires both endpoints.
         // If either is missing, we show a user-friendly error and exit early.
-        if (!isValidCoord(startingCoords) || !isValidCoord(destinationCoords)) {
+        if (
+          !routeRequest ||
+          !isValidCoords(routeRequest.startingCoords) ||
+          !isValidCoords(routeRequest.destinationCoords)
+        ) {
           if (!isCurrent) return;
 
           setError(
@@ -241,15 +346,7 @@ const Route = () => {
         }
 
         // Build a single params object to keep service calls explicit and easy to log/debug.
-        const parsedParams = {
-          startingAddress,
-          destinationAddress,
-          startingCoords,
-          destinationCoords,
-          travelMode: selectedTravelMode,
-          numStops,
-          selectedPoiTypes,
-        };
+        const parsedParams = { ...routeRequest };
 
         const result = await buildGoogleRoute(parsedParams);
 
@@ -285,15 +382,7 @@ const Route = () => {
     return () => {
       isCurrent = false;
     };
-  }, [
-    startingAddress,
-    destinationAddress,
-    startingCoords,
-    destinationCoords,
-    selectedTravelMode,
-    numStops,
-    selectedPoiTypes,
-  ]);
+  }, [routeRequest]);
 
   // Effect 2: Load POIs whenever a route is available.
   // Current implementation is a placeholder so the screen structure is ready
@@ -315,6 +404,7 @@ const Route = () => {
         setPoiLoading(true);
         setPoiError(null);
         setSuggestedStops([]);
+        setAllRoutePois([]);
 
         const routeSamplePoints = getSamplePointsAlongRoute(
           routeData.routeCoords,
@@ -337,7 +427,10 @@ const Route = () => {
 
         const nearbyRoutePois = routeAwarePois.filter((poi) => {
           if (typeof poi.closestRouteDistanceMeters !== "number") return false; // Exclude POIs with unknown distance to route.
-          return poi.closestRouteDistanceMeters <= 3000; // Only include POIs within 3 km of the route.
+          // Only include POIs within the accepted distance of the route.
+          return (
+            poi.closestRouteDistanceMeters <= MAX_DISTANCE_FROM_ROUTE_METERS
+          );
         });
 
         console.log(
@@ -367,8 +460,9 @@ const Route = () => {
           nearbyRoutePois,
           numStops,
           {
-            maxDistanceFromRouteMeters: 3000,
-            preferredCategories: selectedPoiTypes,
+            maxDistanceFromRouteMeters: MAX_DISTANCE_FROM_ROUTE_METERS,
+            preferredCategories:
+              normalizeSelectedPoiTypes(selectedPoiTypes),
           },
         );
 
@@ -392,6 +486,8 @@ const Route = () => {
         if (!isCurrent) return;
 
         console.log("Suggested stops error:", error);
+        setSuggestedStops([]);
+        setAllRoutePois([]);
         setPoiError("Unable to load suggested stops.");
       } finally {
         if (isCurrent) {
@@ -410,6 +506,16 @@ const Route = () => {
       setFinalRouteError(
         "Choose at least one stop before building the final route.",
       );
+      return;
+    }
+
+    if (selectedStops.length > maxSuggestedStops) {
+      setPremiumGate("moreStops");
+      return;
+    }
+
+    if (getCustomStopCount(selectedStops) > maxCustomStops) {
+      setPremiumGate("customStops");
       return;
     }
 
@@ -473,13 +579,27 @@ const Route = () => {
 
   const displayedRouteData = finalRouteData ?? routeData;
   const mapMarkers = selectedStops;
+  const routeMidpoint =
+    routeData?.routeCoords?.[
+      Math.floor((routeData?.routeCoords?.length ?? 0) / 2)
+    ];
+  const customStopLocationBias = routeMidpoint
+    ? {
+        latitude: routeMidpoint.latitude,
+        longitude: routeMidpoint.longitude,
+        radiusMeters: 50000,
+      }
+    : null;
+  const customStopSearchPoints = routeData?.routeCoords?.length
+    ? getSamplePointsAlongRoute(routeData.routeCoords)
+    : [];
 
   // Render branch 1: full-page loader while initial route call runs.
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center bg-wn-cream px-6">
+      <View className="flex-1 items-center justify-center bg-stone-50 px-6">
         <ActivityIndicator size="large" color="#1D3B2A" />
-        <Text className="mt-4 text-lg text-wn-darkGreen">
+        <Text className="mt-4 text-lg text-emerald-950">
           Building your route...
         </Text>
       </View>
@@ -489,7 +609,7 @@ const Route = () => {
   // Render branch 2: full-page error if route could not be built.
   if (error) {
     return (
-      <View className="flex-1 items-center justify-center bg-wn-cream px-6">
+      <View className="flex-1 items-center justify-center bg-stone-50 px-6">
         <Text className="text-lg text-red-600">{error}</Text>
       </View>
     );
@@ -497,7 +617,7 @@ const Route = () => {
 
   if (!routeData) {
     return (
-      <View className="flex-1 items-center justify-center bg-wn-cream px-6">
+      <View className="flex-1 items-center justify-center bg-stone-50 px-6">
         <Text className="text-lg text-red-600">
           Route data is unavailable. Please go back and try again.
         </Text>
@@ -516,12 +636,13 @@ const Route = () => {
     <View className="flex-1 bg-background">
       <ScrollView
         className="flex-1 px-2 py-8"
+        nestedScrollEnabled
         contentContainerStyle={{
           paddingBottom: selectedStops.length > 0 ? 150 : 90,
         }}
       >
         {/* Map panel showing the computed route polyline and any suggested stop markers. */}
-        <View className=" h-[480px] w-full overflow-hidden">
+        <View className=" h-[380px] w-full overflow-hidden">
           <MapComponent
             startCoords={finalStartingCoords}
             destCoords={finalDestinationCoords}
@@ -533,82 +654,153 @@ const Route = () => {
           />
         </View>
 
-        {/* RouteSummaryCard repeats key route configuration + output in a compact card. */}
-        <View className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
-          <RouteSummaryCard
-            startingAddress={routeData.parsedParams.startingAddress}
-            destinationAddress={routeData.parsedParams.destinationAddress}
-            travelMode={routeData.parsedParams.travelMode}
-            distanceText={displayedRouteData.distanceText}
-            durationText={displayedRouteData.durationText}
-            numStops={routeData.parsedParams.numStops}
-            stopCount={suggestedStops.length}
-            selectedStopCount={selectedStops.length}
-            selectedPoiTypes={routeData.parsedParams.selectedPoiTypes}
-          />
-        </View>
+        {finalRouteData && (
+          <View className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
+            <Text className="text-xl font-bold text-emerald-950">
+              Final route ready
+            </Text>
+
+            <Text className="mt-2 text-base text-stone-600">
+              Your selected stops have been added to the route.
+            </Text>
+
+            <Text className="mt-1 text-sm font-semibold text-emerald-950">
+              {selectedStops.length} selected{" "}
+              {selectedStops.length === 1 ? "stop" : "stops"} included.
+            </Text>
+          </View>
+        )}
+
+        <RouteSummaryCard
+          startingAddress={routeData.parsedParams.startingAddress}
+          destinationAddress={routeData.parsedParams.destinationAddress}
+          travelMode={routeData.parsedParams.travelMode}
+          distanceText={displayedRouteData.distanceText}
+          durationText={displayedRouteData.durationText}
+          numStops={numStops}
+          selectedStopCount={selectedStops.length}
+          selectedPoiTypes={selectedPoiTypes}
+        />
 
         <SelectedStopsList
           selectedStops={selectedStops}
           onRemoveStop={toggleSelectedStop}
           onRemoveAllStops={removeAllSelectedStops}
+          emptyMessage={
+            noAutoStopsRequested
+              ? "No stops selected yet. Search for a custom stop below to add one manually."
+              : "No stops selected yet. Add suggested or custom stops to customize your route."
+          }
         />
 
-        <AddCustomStopCard onAddStop={handleAddCustomStop} />
+        {premiumGate === "moreStops" && (
+          <PremiumFeatureCard
+            title={moreStopsPremiumCopy.title}
+            message={moreStopsPremiumCopy.message}
+            onClose={closePremiumGate}
+            showDevToggle
+            onEnablePremiumForTesting={enablePremiumForTesting}
+          />
+        )}
 
-        <SuggestedStopsList
-          title="Top Suggestions"
-          emptyMessage="No top suggestions found for this route."
-          allSelectedMessage="All top suggestions have been selected"
-          poiLoading={poiLoading}
-          poiError={poiError}
-          suggestedStops={visibleSuggestedStops}
-          totalSuggestedStopCount={suggestedStops.length}
-          selectedStops={selectedStops}
-          onToggleStop={toggleSelectedStop}
+        {premiumGate === "customStops" && (
+          <PremiumFeatureCard
+            title={customStopsPremiumCopy.title}
+            message={customStopsPremiumCopy.message}
+            onClose={closePremiumGate}
+            showDevToggle
+            onEnablePremiumForTesting={enablePremiumForTesting}
+          />
+        )}
+
+        <AddCustomStopCard
+          onAddStop={handleAddCustomStop}
+          locationBias={customStopLocationBias}
+          customSearchPoints={customStopSearchPoints}
         />
 
-        <View className="mt-4 px-1">
-          <Text className="text-2xl font-bold text-white">
-            More Stops Along Route
-          </Text>
-
-          <Text className="mt-1 text-sm text-white">
-            Browse additional stops by category.
-          </Text>
-        </View>
-
-        {!poiLoading && groupedVisibleAllRoutePois.length === 0 && (
+        {noAutoStopsRequested && (
           <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
-            <Text className="text-wn-text">
-              No additional stops available for this route.
+            <Text className="text-xl font-bold text-emerald-950">
+              No automatic stops requested
+            </Text>
+
+            <Text className="mt-2 text-stone-600">
+              Wander North will not suggest stops for this route, but you can
+              still add your own custom stops.
             </Text>
           </View>
         )}
 
-        {!poiLoading &&
-          groupedVisibleAllRoutePois.map((group) => (
+        {!noAutoStopsRequested && (
+          <>
             <SuggestedStopsList
-              key={group.category}
-              title={group.title}
-              emptyMessage={`No ${group.title.toLowerCase()} found for this route.`}
-              allSelectedMessage={`All ${group.title.toLowerCase()} have been selected.`}
-              poiLoading={false}
-              poiError={null}
-              suggestedStops={group.stops}
-              totalSuggestedStopCount={group.stops.length}
+              title="Top Suggestions"
+              emptyMessage="No top suggestions found for this route."
+              allSelectedMessage="All top suggestions have been selected"
+              poiLoading={poiLoading}
+              poiError={poiError}
+              suggestedStops={visibleSuggestedStops}
+              totalSuggestedStopCount={suggestedStops.length}
               selectedStops={selectedStops}
               onToggleStop={toggleSelectedStop}
-              collapsible
-              defaultCollapsed
-              stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
             />
-          ))}
+
+            <View className="mt-4 px-1">
+              <Text className="text-2xl font-bold text-white">
+                More Stops Along Route
+              </Text>
+
+              <Text className="mt-1 text-sm text-white">
+                Browse additional stops by category.
+              </Text>
+            </View>
+
+            {!poiLoading && groupedVisibleAllRoutePois.length === 0 && (
+              <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
+                <Text className="text-stone-600">
+                  No additional stops available for this route.
+                </Text>
+              </View>
+            )}
+
+            {!poiLoading &&
+              groupedVisibleAllRoutePois.map((group) => (
+                <SuggestedStopsList
+                  key={group.category}
+                  title={group.title}
+                  emptyMessage={`No ${group.title.toLowerCase()} found for this route.`}
+                  allSelectedMessage={`All ${group.title.toLowerCase()} have been selected.`}
+                  poiLoading={false}
+                  poiError={null}
+                  suggestedStops={group.stops}
+                  totalSuggestedStopCount={group.stops.length}
+                  selectedStops={selectedStops}
+                  onToggleStop={toggleSelectedStop}
+                  collapsible
+                  defaultCollapsed
+                  stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
+                />
+              ))}
+          </>
+        )}
       </ScrollView>
 
-      <View className="border-t border-wn-border bg-white px-4 pb-6 pt-3 shadow-lg">
+      <View
+        className="border-t border-stone-200 bg-white px-4 pt-3 shadow-lg"
+        style={{ paddingBottom: Math.max(insets.bottom + 16, 24) }}
+      >
         {finalRouteError && (
           <Text className="mb-2 text-sm text-red-600">{finalRouteError}</Text>
+        )}
+
+        {finalRouteData && (
+          <View className="mb-3">
+            <WNButton
+              label="Open in Google Maps"
+              onPress={handleOpenInGoogleMaps}
+            />
+          </View>
         )}
 
         {selectedStops.length > 0 && (
@@ -616,7 +808,9 @@ const Route = () => {
             label={
               finalRouteLoading
                 ? "Building Final Route..."
-                : "Build Final Route"
+                : finalRouteData
+                  ? "Rebuild Final Route"
+                  : "Build Final Route"
             }
             onPress={handleBuildFinalRoute}
             disabled={finalRouteLoading}
@@ -626,7 +820,7 @@ const Route = () => {
         <View className={selectedStops.length > 0 ? "mt-3" : ""}>
           <WNButton
             label="Edit Route"
-            onPress={() => router.back()}
+            onPress={handleEditRoute}
             variant="secondary"
           />
         </View>

@@ -3,10 +3,9 @@
  *
  * Helpers for measuring where a POI sits along a route.
  *
- * This does not need to be perfect yet.
- * It gives us a useful approximation:
- * - Find the closest route coordinate to the POI
- * - Use that coordinate's index to estimate route progress
+ * POI proximity is measured against route segments, and route progress is
+ * estimated from cumulative travelled distance. Invalid or degenerate routes
+ * fall back to the original closest-coordinate approximation.
  */
 
 /**
@@ -64,35 +63,101 @@ export function getDistanceMeters(pointA, pointB) {
   return earthRadiusMeters * c;
 }
 
-/**
- * Finds the closest sampled route coordinate to a POI and estimates route
- * progress based on that coordinate's index.
- *
- * Note on approximation:
- * We measure distance to discrete route points, not to route segments.
- * This is fast and usually good enough for ordering/labeling stops, but it is
- * not a mathematically exact "distance to polyline" projection.
- *
- * @param {{ latitude: number, longitude: number }} poi
- * @param {Array<{ latitude: number, longitude: number }>} routeCoords
- * @returns {{
- *   closestIndex: number,
- *   closestDistanceMeters: number,
- *   routeProgress: number,
- *   routeProgressPercent: number
- * } | null}
- */
-export function getClosestRoutePointInfo(poi, routeCoords = []) {
-  if (!poi || !Array.isArray(routeCoords) || routeCoords.length === 0) {
-    // Defensive handling of invalid input: if we don't have a valid POI or route coordinates, we cannot compute meaningful proximity info, so we return null.
-    return null;
+function isValidCoordinate(coord) {
+  return (
+    coord &&
+    typeof coord.latitude === "number" &&
+    typeof coord.longitude === "number" &&
+    Number.isFinite(coord.latitude) &&
+    Number.isFinite(coord.longitude)
+  );
+}
+
+function toPlanarPointMeters(origin, point) {
+  if (!isValidCoordinate(origin) || !isValidCoordinate(point)) return null;
+
+  const earthRadiusMeters = 6371000;
+  const originLatitudeRadians = toRadians(origin.latitude);
+
+  return {
+    x:
+      toRadians(point.longitude - origin.longitude) *
+      earthRadiusMeters *
+      Math.cos(originLatitudeRadians),
+    y:
+      toRadians(point.latitude - origin.latitude) * earthRadiusMeters,
+  };
+}
+
+function getClosestPointOnSegment(point, segmentStart, segmentEnd) {
+  const planarPoint = toPlanarPointMeters(segmentStart, point);
+  const planarSegmentEnd = toPlanarPointMeters(segmentStart, segmentEnd);
+
+  if (!planarPoint || !planarSegmentEnd) return null;
+
+  const segmentLengthSquared =
+    planarSegmentEnd.x * planarSegmentEnd.x +
+    planarSegmentEnd.y * planarSegmentEnd.y;
+
+  if (segmentLengthSquared === 0) {
+    return {
+      point: { x: 0, y: 0 },
+      planarPoint,
+      projectionFactor: 0,
+    };
   }
 
+  const unboundedProjectionFactor =
+    (planarPoint.x * planarSegmentEnd.x +
+      planarPoint.y * planarSegmentEnd.y) /
+    segmentLengthSquared;
+  const projectionFactor = Math.min(
+    Math.max(unboundedProjectionFactor, 0),
+    1,
+  );
+
+  return {
+    point: {
+      x: planarSegmentEnd.x * projectionFactor,
+      y: planarSegmentEnd.y * projectionFactor,
+    },
+    planarPoint,
+    projectionFactor,
+  };
+}
+
+function getDistanceToRouteSegmentMeters(
+  point,
+  segmentStart,
+  segmentEnd,
+) {
+  const closestPoint = getClosestPointOnSegment(
+    point,
+    segmentStart,
+    segmentEnd,
+  );
+
+  if (!closestPoint) {
+    return {
+      distanceMeters: Infinity,
+      projectionFactor: 0,
+    };
+  }
+
+  return {
+    distanceMeters: Math.hypot(
+      closestPoint.planarPoint.x - closestPoint.point.x,
+      closestPoint.planarPoint.y - closestPoint.point.y,
+    ),
+    projectionFactor: closestPoint.projectionFactor,
+  };
+}
+
+function getClosestCoordinateInfo(poi, routeCoords) {
   let closestIndex = 0;
   let closestDistanceMeters = Infinity;
 
   routeCoords.forEach((routePoint, index) => {
-    // Compare POI -> current route coordinate distance.
     const distanceMeters = getDistanceMeters(
       {
         latitude: poi.latitude,
@@ -107,15 +172,114 @@ export function getClosestRoutePointInfo(poi, routeCoords = []) {
     }
   });
 
-  // Normalize index into [0, 1] so downstream UI can reason in percentages.
   const routeProgress =
     routeCoords.length > 1 ? closestIndex / (routeCoords.length - 1) : 0;
 
   return {
-    closestIndex, // Useful for debugging and potential future features, even if not currently used in UI.
-    closestDistanceMeters, // This is the key value for determining how "close" a POI is to the route.
-    routeProgress, // Continuous value from 0 to 1 representing progress along the route.
-    routeProgressPercent: Math.round(routeProgress * 100), // Rounded percentage for easier UI display and labeling.
+    closestIndex,
+    closestDistanceMeters,
+    routeProgress,
+    routeProgressPercent: Math.round(routeProgress * 100),
+  };
+}
+
+/**
+ * Finds the closest route segment to a POI and estimates progress from the
+ * cumulative travelled distance at the projected point.
+ *
+ * @param {{ latitude: number, longitude: number }} poi
+ * @param {Array<{ latitude: number, longitude: number }>} routeCoords
+ * @returns {{
+ *   closestIndex: number,
+ *   closestDistanceMeters: number,
+ *   routeProgress: number,
+ *   routeProgressPercent: number,
+ *   closestSegmentStartIndex?: number,
+ *   closestSegmentEndIndex?: number,
+ *   distanceAlongRouteMeters?: number,
+ *   totalRouteDistanceMeters?: number
+ * } | null}
+ */
+export function getClosestRoutePointInfo(poi, routeCoords = []) {
+  if (!poi || !Array.isArray(routeCoords) || routeCoords.length === 0) {
+    return null;
+  }
+
+  const fallbackInfo = () => getClosestCoordinateInfo(poi, routeCoords);
+
+  if (
+    !isValidCoordinate(poi) ||
+    routeCoords.length < 2 ||
+    !routeCoords.every(isValidCoordinate)
+  ) {
+    return fallbackInfo();
+  }
+
+  let cumulativeDistanceMeters = 0;
+  let bestSegmentInfo = null;
+
+  for (let index = 0; index < routeCoords.length - 1; index += 1) {
+    const segmentStart = routeCoords[index];
+    const segmentEnd = routeCoords[index + 1];
+    const segmentDistanceMeters = getDistanceMeters(segmentStart, segmentEnd);
+
+    if (
+      !Number.isFinite(segmentDistanceMeters) ||
+      segmentDistanceMeters < 0
+    ) {
+      return fallbackInfo();
+    }
+
+    const segmentProximity = getDistanceToRouteSegmentMeters(
+      poi,
+      segmentStart,
+      segmentEnd,
+    );
+    const distanceAlongRouteMeters =
+      cumulativeDistanceMeters +
+      segmentDistanceMeters * segmentProximity.projectionFactor;
+
+    if (
+      Number.isFinite(segmentProximity.distanceMeters) &&
+      (!bestSegmentInfo ||
+        segmentProximity.distanceMeters < bestSegmentInfo.distanceMeters)
+    ) {
+      bestSegmentInfo = {
+        distanceMeters: segmentProximity.distanceMeters,
+        distanceAlongRouteMeters,
+        startIndex: index,
+        endIndex: index + 1,
+      };
+    }
+
+    cumulativeDistanceMeters += segmentDistanceMeters;
+  }
+
+  if (
+    !bestSegmentInfo ||
+    !Number.isFinite(cumulativeDistanceMeters) ||
+    cumulativeDistanceMeters <= 0
+  ) {
+    return fallbackInfo();
+  }
+
+  const routeProgress = Math.min(
+    Math.max(
+      bestSegmentInfo.distanceAlongRouteMeters / cumulativeDistanceMeters,
+      0,
+    ),
+    1,
+  );
+
+  return {
+    closestIndex: bestSegmentInfo.startIndex,
+    closestDistanceMeters: bestSegmentInfo.distanceMeters,
+    routeProgress,
+    routeProgressPercent: Math.round(routeProgress * 100),
+    closestSegmentStartIndex: bestSegmentInfo.startIndex,
+    closestSegmentEndIndex: bestSegmentInfo.endIndex,
+    distanceAlongRouteMeters: bestSegmentInfo.distanceAlongRouteMeters,
+    totalRouteDistanceMeters: cumulativeDistanceMeters,
   };
 }
 
@@ -124,8 +288,8 @@ export function getClosestRoutePointInfo(poi, routeCoords = []) {
  * earliest to latest appearance along the route.
  *
  * Output fields added:
- * - closestRouteDistanceMeters: Approximate POI-to-route proximity.
- * - closestRouteIndex: Nearest sampled route coordinate index.
+ * - closestRouteDistanceMeters: Approximate POI-to-route-segment proximity.
+ * - closestRouteIndex: Closest segment's start index.
  * - routeProgress: Continuous value from 0 to 1.
  * - routeProgressPercent: Rounded UI-friendly progress percentage.
  *
@@ -150,8 +314,8 @@ export function attachRoutePositionToPois(pois = [], routeCoords = []) {
       if (!routeInfo) {
         return {
           ...poi,
-          closestRouteDistanceMeters: null, // Approximate POI-to-route proximity is unknown.
-          closestRouteIndex: null, // Nearest sampled route coordinate index is unknown.
+          closestRouteDistanceMeters: null, // Approximate POI-to-route-segment proximity is unknown.
+          closestRouteIndex: null, // Closest route segment index is unknown.
           routeProgress: null, // Continuous value from 0 to 1 is unknown.
           routeProgressPercent: null, // Rounded UI-friendly progress percentage is unknown.
         };
@@ -159,8 +323,8 @@ export function attachRoutePositionToPois(pois = [], routeCoords = []) {
 
       return {
         ...poi,
-        closestRouteDistanceMeters: routeInfo.closestDistanceMeters, // Approximate POI-to-route proximity in meters, used for determining "closeness".
-        closestRouteIndex: routeInfo.closestIndex, // Nearest sampled route coordinate index, useful for debugging and potential future features.
+        closestRouteDistanceMeters: routeInfo.closestDistanceMeters, // Approximate POI-to-route-segment proximity in meters.
+        closestRouteIndex: routeInfo.closestIndex, // Closest segment's start index, or fallback coordinate index.
         routeProgress: routeInfo.routeProgress, // Continuous value from 0 to 1 representing progress along the route, used for ordering and potential UI features.
         routeProgressPercent: routeInfo.routeProgressPercent, // Rounded UI-friendly progress percentage, used for labeling and display purposes.
       };
