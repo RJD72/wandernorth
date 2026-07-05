@@ -9,7 +9,7 @@ import { TouchableOpacity } from "react-native";
 
 /**
  * RootLayout component - Sets up the main tab navigation structure
- * for the application with three primary tabs: Home, Explore, and Navigate
+ * for the application with four primary tabs: Home, Explore, Navigate, and Saved
  */
 export default function RootLayout() {
   return (
@@ -68,6 +68,25 @@ export default function RootLayout() {
             <FontAwesome name="map" color={color} size={24} />
           ),
           // Back button in header for navigating to previous screen
+          headerLeft: () => (
+            <TouchableOpacity onPress={() => router.back()} className="mx-4">
+              <FontAwesome name="arrow-left" color="#FFF" size={24} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
+
+      {/* Saved Trips Tab - Locally stored finished routes */}
+      <Tabs.Screen
+        name="saved-trips"
+        options={{
+          headerStyle: { backgroundColor: "#0B0B0B" },
+          headerTintColor: "#FFF",
+          headerShown: true,
+          title: "Saved",
+          tabBarIcon: ({ color }) => (
+            <FontAwesome name="bookmark" color={color} size={24} />
+          ),
           headerLeft: () => (
             <TouchableOpacity onPress={() => router.back()} className="mx-4">
               <FontAwesome name="arrow-left" color="#FFF" size={24} />

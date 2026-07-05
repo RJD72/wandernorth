@@ -4,6 +4,8 @@ import {
   ActivityIndicator,
   ScrollView,
   Linking,
+  Pressable,
+  Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -26,6 +28,7 @@ import {
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
+import { useSavedTripsStore } from "../store/useSavedTripsStore";
 import {
   FEATURES,
   getFeatureLimits,
@@ -57,18 +60,29 @@ function formatCoordinatesForGoogleMaps(coords) {
   return `${coords.latitude},${coords.longitude}`;
 }
 
+function sortStopsByRouteProgress(stops = []) {
+  return [...stops].sort((a, b) => {
+    const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
+    const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
+
+    return aProgress - bProgress;
+  });
+}
+
+function buildSavedTripTitle(routeParams) {
+  const startingAddress = routeParams?.startingAddress || "Start";
+  const destinationAddress = routeParams?.destinationAddress || "Destination";
+
+  return `${startingAddress} to ${destinationAddress}`;
+}
+
 function buildGoogleMapsDirectionsUrl({
   origin,
   destination,
   selectedStops = [],
   travelMode,
 }) {
-  const sortedStops = [...selectedStops].sort((a, b) => {
-    const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
-    const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
-
-    return aProgress - bProgress;
-  });
+  const sortedStops = sortStopsByRouteProgress(selectedStops);
 
   const waypoints = sortedStops
     .map(getStopCoords)
@@ -114,6 +128,39 @@ function formatCategoryTitle(category) {
   );
 }
 
+function CollapsibleSection({
+  title,
+  subtitle,
+  defaultCollapsed = false,
+  children,
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  return (
+    <View className="mt-4 overflow-hidden rounded-2xl bg-white shadow-sm">
+      <Pressable
+        onPress={() => setCollapsed((current) => !current)}
+        accessibilityRole="button"
+        accessibilityLabel={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+        className="flex-row items-center justify-between px-4 py-4"
+      >
+        <View className="flex-1 pr-3">
+          <Text className="text-lg font-bold text-emerald-950">{title}</Text>
+          {subtitle ? (
+            <Text className="mt-1 text-sm text-stone-600">{subtitle}</Text>
+          ) : null}
+        </View>
+
+        <Text className="text-xl font-bold text-emerald-950">
+          {collapsed ? "+" : "−"}
+        </Text>
+      </Pressable>
+
+      {!collapsed && <View className="px-4 pb-4">{children}</View>}
+    </View>
+  );
+}
+
 const Route = () => {
   // Primary route request lifecycle state.
   // - loading controls the initial screen state while route data is being built.
@@ -136,10 +183,32 @@ const Route = () => {
   const [finalRouteLoading, setFinalRouteLoading] = useState(false);
   const [finalRouteError, setFinalRouteError] = useState(null);
   const [premiumGate, setPremiumGate] = useState(null);
+  const [savingTrip, setSavingTrip] = useState(false);
+  const [savedTripMessage, setSavedTripMessage] = useState(null);
+  const [saveTripError, setSaveTripError] = useState(null);
+  const [hasUnsavedSavedTripChanges, setHasUnsavedSavedTripChanges] =
+    useState(false);
 
+  const router = useRouter();
+  const { returnTo, savedTripId, mode } = useLocalSearchParams();
   const { activeRouteRequest } = useRoutePlannerStore();
   const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
-  const routeRequest = activeRouteRequest;
+  const {
+    addTrip,
+    updateTrip,
+    savedTripsError,
+    clearSavedTripsError,
+    activeSavedTrip,
+  } = useSavedTripsStore();
+  const requestedSavedTripMode = mode === "savedTrip";
+  const isSavedTripMode = Boolean(
+    requestedSavedTripMode &&
+      activeSavedTrip &&
+      activeSavedTrip.id === savedTripId,
+  );
+  const routeRequest = isSavedTripMode
+    ? activeSavedTrip.routeRequest
+    : activeRouteRequest;
   const numStops = routeRequest?.numStops ?? 3;
   const parsedStopCount = Number(numStops);
   const noAutoStopsRequested =
@@ -155,9 +224,8 @@ const Route = () => {
   const customStopsPremiumCopy = getPremiumFeatureMessage(
     FEATURES.MULTIPLE_CUSTOM_STOPS,
   );
+  const saveTripsPremiumCopy = getPremiumFeatureMessage(FEATURES.SAVE_TRIPS);
 
-  const router = useRouter();
-  const { returnTo } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
   function closePremiumGate() {
@@ -173,13 +241,43 @@ const Route = () => {
     return stops.length >= maxSuggestedStops;
   }
 
-  function handleEditRoute() {
+  function clearSaveTripStatus() {
+    setSavedTripMessage(null);
+    setSaveTripError(null);
+    clearSavedTripsError();
+  }
+
+  function goBackFromRoute() {
     if (typeof returnTo === "string") {
       router.replace(returnTo);
       return;
     }
 
     router.replace("/(tabs)/navigate");
+  }
+
+  function handleEditRoute() {
+    if (isSavedTripMode && hasUnsavedSavedTripChanges) {
+      Alert.alert(
+        "Discard changes?",
+        "You have changes that have not been saved. Update this saved trip before leaving, or discard your changes.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Discard Changes",
+            style: "destructive",
+            onPress: goBackFromRoute,
+          },
+        ],
+      );
+
+      return;
+    }
+
+    goBackFromRoute();
   }
 
   async function handleOpenInGoogleMaps() {
@@ -200,6 +298,8 @@ const Route = () => {
   function toggleSelectedStop(stop) {
     const stopId = getStopId(stop);
 
+    clearSaveTripStatus();
+
     setSelectedStops((currentStops) => {
       const alreadySelected = currentStops.some((currentStop) => {
         return getStopId(currentStop) === stopId;
@@ -208,6 +308,10 @@ const Route = () => {
       if (alreadySelected) {
         setFinalRouteData(null);
         setFinalRouteError(null);
+
+        if (isSavedTripMode) {
+          setHasUnsavedSavedTripChanges(true);
+        }
 
         return currentStops.filter((currentStop) => {
           return getStopId(currentStop) !== stopId;
@@ -222,19 +326,30 @@ const Route = () => {
       setFinalRouteData(null);
       setFinalRouteError(null);
 
+      if (isSavedTripMode) {
+        setHasUnsavedSavedTripChanges(true);
+      }
+
       return [...currentStops, stop];
     });
   }
 
   function removeAllSelectedStops() {
+    clearSaveTripStatus();
     setFinalRouteData(null);
     setFinalRouteError(null);
     setSelectedStops([]);
     setPremiumGate(null);
+
+    if (isSavedTripMode) {
+      setHasUnsavedSavedTripChanges(true);
+    }
   }
 
   function handleAddCustomStop(customStop) {
     if (!customStop) return;
+
+    clearSaveTripStatus();
 
     if (!routeData?.routeCoords?.length) {
       setFinalRouteError("Route data is not ready yet. Please try again");
@@ -260,6 +375,10 @@ const Route = () => {
 
     setFinalRouteData(null);
     setFinalRouteError(null);
+
+    if (isSavedTripMode) {
+      setHasUnsavedSavedTripChanges(true);
+    }
 
     setSelectedStops((currentStops) => {
       return [...currentStops, routeAwareCustomStop ?? customStop];
@@ -325,10 +444,68 @@ const Route = () => {
         setLoading(true);
         setError(null);
         setRouteData(null);
+        setFinalRouteData(null);
+        setFinalRouteLoading(false);
+        setFinalRouteError(null);
         setSuggestedStops([]);
         setSelectedStops([]);
         setAllRoutePois([]);
         setPremiumGate(null);
+        setSavingTrip(false);
+        setHasUnsavedSavedTripChanges(false);
+        clearSaveTripStatus();
+
+        if (requestedSavedTripMode) {
+          const savedRouteRequest = activeSavedTrip?.routeRequest;
+          const savedRoute = activeSavedTrip?.route;
+          const savedEncodedPolyline = savedRoute?.encodedPolyline;
+
+          if (
+            !isSavedTripMode ||
+            !savedRouteRequest ||
+            typeof savedEncodedPolyline !== "string" ||
+            !savedEncodedPolyline.trim()
+          ) {
+            setError(
+              "Unable to reopen this saved trip. The saved route data is incomplete.",
+            );
+            return;
+          }
+
+          const routeCoords = polyline
+            .decode(savedEncodedPolyline)
+            .map(([latitude, longitude]) => ({
+              latitude,
+              longitude,
+            }));
+
+          if (routeCoords.length === 0) {
+            setError(
+              "Unable to reopen this saved trip. The saved route data is incomplete.",
+            );
+            return;
+          }
+
+          const savedSelectedStops = Array.isArray(
+            activeSavedTrip.selectedStops,
+          )
+            ? activeSavedTrip.selectedStops
+            : [];
+
+          setRouteData({
+            ...savedRoute,
+            routeCoords,
+            parsedParams: savedRouteRequest,
+          });
+          setFinalRouteData({
+            ...savedRoute,
+            routeCoords,
+            selectedStops: savedSelectedStops,
+          });
+          setSelectedStops(savedSelectedStops);
+          setHasUnsavedSavedTripChanges(false);
+          return;
+        }
 
         // Guard clause: route computation requires both endpoints.
         // If either is missing, we show a user-friendly error and exit early.
@@ -370,7 +547,11 @@ const Route = () => {
       } catch (error) {
         if (!isCurrent) return;
         console.log("Route build error", error);
-        setError("Failed to build route. Please try again.");
+        setError(
+          requestedSavedTripMode
+            ? "Unable to reopen this saved trip. The saved route data is incomplete."
+            : "Failed to build route. Please try again.",
+        );
       } finally {
         if (isCurrent) {
           setLoading(false);
@@ -382,7 +563,12 @@ const Route = () => {
     return () => {
       isCurrent = false;
     };
-  }, [routeRequest]);
+  }, [
+    activeSavedTrip,
+    isSavedTripMode,
+    requestedSavedTripMode,
+    routeRequest,
+  ]);
 
   // Effect 2: Load POIs whenever a route is available.
   // Current implementation is a placeholder so the screen structure is ready
@@ -391,6 +577,14 @@ const Route = () => {
     let isCurrent = true;
 
     async function loadSuggestedStops() {
+      if (requestedSavedTripMode) {
+        setSuggestedStops([]);
+        setAllRoutePois([]);
+        setPoiLoading(false);
+        setPoiError(null);
+        return;
+      }
+
       // Skip POI work until route geometry exists.
       if (!routeData?.routeCoords?.length) {
         setSuggestedStops([]);
@@ -461,8 +655,7 @@ const Route = () => {
           numStops,
           {
             maxDistanceFromRouteMeters: MAX_DISTANCE_FROM_ROUTE_METERS,
-            preferredCategories:
-              normalizeSelectedPoiTypes(selectedPoiTypes),
+            preferredCategories: normalizeSelectedPoiTypes(selectedPoiTypes),
           },
         );
 
@@ -499,9 +692,11 @@ const Route = () => {
     return () => {
       isCurrent = false;
     };
-  }, [routeData, selectedPoiTypes, numStops]);
+  }, [requestedSavedTripMode, routeData, selectedPoiTypes, numStops]);
 
   async function handleBuildFinalRoute() {
+    clearSaveTripStatus();
+
     if (selectedStops.length === 0) {
       setFinalRouteError(
         "Choose at least one stop before building the final route.",
@@ -525,12 +720,7 @@ const Route = () => {
     // Without this, Google receives stops in the order the user tapped them.
     // Example: Stop 3 → Stop 1 → Stop 2.
     // That can create a final route that backtracks.
-    const sortedSelectedStops = [...selectedStops].sort((a, b) => {
-      const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
-      const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
-
-      return aProgress - bProgress;
-    });
+    const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
 
     // Convert sorted stops into waypoint coordinates for the final route request.
     const waypointCoords = sortedSelectedStops
@@ -574,6 +764,107 @@ const Route = () => {
       setFinalRouteError("Failed to build final route with selected stops.");
     } finally {
       setFinalRouteLoading(false);
+    }
+  }
+
+  async function handleSaveTrip() {
+    clearSaveTripStatus();
+
+    if (!featureLimits.canSaveTrips) {
+      setPremiumGate("saveTrips");
+      return null;
+    }
+
+    if (!routeData) {
+      setSaveTripError("Route data is not ready yet. Please try again.");
+      return null;
+    }
+
+    if (selectedStops.length === 0) {
+      setSaveTripError("Add at least one stop before saving this trip.");
+      return null;
+    }
+
+    if (!finalRouteData) {
+      setSaveTripError(
+        isSavedTripMode
+          ? "Rebuild the final route before updating this saved trip."
+          : "Build the final route before saving this trip.",
+      );
+      return null;
+    }
+
+    const routeToSave = finalRouteData;
+    const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
+    const savedTripPayload = {
+      title: buildSavedTripTitle(routeData.parsedParams),
+      source: routeData.parsedParams?.source ?? "unknown",
+      routeRequest: {
+        ...routeData.parsedParams,
+      },
+      summary: {
+        startingAddress: routeData.parsedParams?.startingAddress ?? "",
+        destinationAddress: routeData.parsedParams?.destinationAddress ?? "",
+        travelMode: routeData.parsedParams?.travelMode ?? "driving",
+        distanceMeters: routeToSave.distanceMeters ?? null,
+        distanceText: routeToSave.distanceText ?? null,
+        duration: routeToSave.duration ?? null,
+        durationText: routeToSave.durationText ?? null,
+        selectedStopCount: sortedSelectedStops.length,
+        isFinalRoute: true,
+      },
+      route: {
+        encodedPolyline: routeToSave.encodedPolyline ?? null,
+        distanceMeters: routeToSave.distanceMeters ?? null,
+        distanceText: routeToSave.distanceText ?? null,
+        duration: routeToSave.duration ?? null,
+        durationText: routeToSave.durationText ?? null,
+        isFinalRoute: true,
+      },
+      selectedStops: sortedSelectedStops,
+      selectedPoiTypes,
+      numStops,
+    };
+
+    try {
+      setSavingTrip(true);
+
+      const savedTrip = isSavedTripMode
+        ? await updateTrip(activeSavedTrip.id, savedTripPayload)
+        : await addTrip(savedTripPayload);
+
+      if (savedTrip === null) {
+        const currentSavedTripsError =
+          useSavedTripsStore.getState().savedTripsError;
+
+        setSaveTripError(
+          currentSavedTripsError ||
+            savedTripsError ||
+            (isSavedTripMode
+              ? "Unable to update saved trip."
+              : "Unable to save trip."),
+        );
+        return null;
+      }
+
+      if (isSavedTripMode) {
+        setHasUnsavedSavedTripChanges(false);
+        setSavedTripMessage("Saved trip updated.");
+      } else {
+        setSavedTripMessage("Trip saved locally.");
+      }
+
+      return savedTrip;
+    } catch (error) {
+      console.warn("[route] Save/update trip error:", error);
+      setSaveTripError(
+        isSavedTripMode
+          ? "Unable to update saved trip."
+          : "Unable to save trip.",
+      );
+      return null;
+    } finally {
+      setSavingTrip(false);
     }
   }
 
@@ -638,30 +929,36 @@ const Route = () => {
         className="flex-1 px-2 py-8"
         nestedScrollEnabled
         contentContainerStyle={{
-          paddingBottom: selectedStops.length > 0 ? 150 : 90,
+          paddingBottom: Math.max(insets.bottom + 40, 64),
         }}
       >
-        {/* Map panel showing the computed route polyline and any suggested stop markers. */}
-        <View className=" h-[380px] w-full overflow-hidden">
-          <MapComponent
-            startCoords={finalStartingCoords}
-            destCoords={finalDestinationCoords}
-            useCurrentLocation={false}
-            travelRadius={0}
-            mapMarkers={mapMarkers}
-            selectedTravelMode={finalTravelMode}
-            routeCoords={displayedRouteData.routeCoords}
-          />
-        </View>
+        <CollapsibleSection
+          title="Map"
+          subtitle="View the route line and selected stop markers."
+        >
+          <View className="h-[380px] w-full overflow-hidden rounded-2xl">
+            <MapComponent
+              startCoords={finalStartingCoords}
+              destCoords={finalDestinationCoords}
+              useCurrentLocation={false}
+              travelRadius={0}
+              mapMarkers={mapMarkers}
+              selectedTravelMode={finalTravelMode}
+              routeCoords={displayedRouteData.routeCoords}
+            />
+          </View>
+        </CollapsibleSection>
 
         {finalRouteData && (
-          <View className="mt-6 rounded-2xl bg-white p-4 shadow-sm">
+          <View className="mt-4 rounded-2xl bg-white p-4 shadow-sm">
             <Text className="text-xl font-bold text-emerald-950">
-              Final route ready
+              {isSavedTripMode ? "Saved route reopened" : "Final route ready"}
             </Text>
 
             <Text className="mt-2 text-base text-stone-600">
-              Your selected stops have been added to the route.
+              {isSavedTripMode
+                ? "Add or remove stops, rebuild the final route, then update this saved trip."
+                : "Your selected stops have been added to the route."}
             </Text>
 
             <Text className="mt-1 text-sm font-semibold text-emerald-950">
@@ -671,27 +968,41 @@ const Route = () => {
           </View>
         )}
 
-        <RouteSummaryCard
-          startingAddress={routeData.parsedParams.startingAddress}
-          destinationAddress={routeData.parsedParams.destinationAddress}
-          travelMode={routeData.parsedParams.travelMode}
-          distanceText={displayedRouteData.distanceText}
-          durationText={displayedRouteData.durationText}
-          numStops={numStops}
-          selectedStopCount={selectedStops.length}
-          selectedPoiTypes={selectedPoiTypes}
-        />
+        <CollapsibleSection
+          title="Route Summary"
+          subtitle={`${displayedRouteData.distanceText || "Distance unavailable"} · ${
+            displayedRouteData.durationText || "Duration unavailable"
+          }`}
+        >
+          <RouteSummaryCard
+            startingAddress={routeData.parsedParams.startingAddress}
+            destinationAddress={routeData.parsedParams.destinationAddress}
+            travelMode={routeData.parsedParams.travelMode}
+            distanceText={displayedRouteData.distanceText}
+            durationText={displayedRouteData.durationText}
+            numStops={numStops}
+            selectedStopCount={selectedStops.length}
+            selectedPoiTypes={selectedPoiTypes}
+          />
+        </CollapsibleSection>
 
-        <SelectedStopsList
-          selectedStops={selectedStops}
-          onRemoveStop={toggleSelectedStop}
-          onRemoveAllStops={removeAllSelectedStops}
-          emptyMessage={
-            noAutoStopsRequested
-              ? "No stops selected yet. Search for a custom stop below to add one manually."
-              : "No stops selected yet. Add suggested or custom stops to customize your route."
-          }
-        />
+        <CollapsibleSection
+          title="Selected Stops"
+          subtitle={`${selectedStops.length} selected ${
+            selectedStops.length === 1 ? "stop" : "stops"
+          }`}
+        >
+          <SelectedStopsList
+            selectedStops={selectedStops}
+            onRemoveStop={toggleSelectedStop}
+            onRemoveAllStops={removeAllSelectedStops}
+            emptyMessage={
+              noAutoStopsRequested
+                ? "No stops selected yet. Search for a custom stop below to add one manually."
+                : "No stops selected yet. Add suggested or custom stops to customize your route."
+            }
+          />
+        </CollapsibleSection>
 
         {premiumGate === "moreStops" && (
           <PremiumFeatureCard
@@ -713,11 +1024,27 @@ const Route = () => {
           />
         )}
 
-        <AddCustomStopCard
-          onAddStop={handleAddCustomStop}
-          locationBias={customStopLocationBias}
-          customSearchPoints={customStopSearchPoints}
-        />
+        {premiumGate === "saveTrips" && (
+          <PremiumFeatureCard
+            title={saveTripsPremiumCopy.title}
+            message={saveTripsPremiumCopy.message}
+            onClose={closePremiumGate}
+            showDevToggle
+            onEnablePremiumForTesting={enablePremiumForTesting}
+          />
+        )}
+
+        <CollapsibleSection
+          title="Add Custom Stop"
+          subtitle="Search for a specific place to add to this route."
+          defaultCollapsed={!isSavedTripMode}
+        >
+          <AddCustomStopCard
+            onAddStop={handleAddCustomStop}
+            locationBias={customStopLocationBias}
+            customSearchPoints={customStopSearchPoints}
+          />
+        </CollapsibleSection>
 
         {noAutoStopsRequested && (
           <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -734,97 +1061,144 @@ const Route = () => {
 
         {!noAutoStopsRequested && (
           <>
-            <SuggestedStopsList
+            <CollapsibleSection
               title="Top Suggestions"
-              emptyMessage="No top suggestions found for this route."
-              allSelectedMessage="All top suggestions have been selected"
-              poiLoading={poiLoading}
-              poiError={poiError}
-              suggestedStops={visibleSuggestedStops}
-              totalSuggestedStopCount={suggestedStops.length}
-              selectedStops={selectedStops}
-              onToggleStop={toggleSelectedStop}
-            />
+              subtitle={
+                poiLoading
+                  ? "Loading suggested stops..."
+                  : `${visibleSuggestedStops.length} available`
+              }
+            >
+              <SuggestedStopsList
+                title="Top Suggestions"
+                emptyMessage="No top suggestions found for this route."
+                allSelectedMessage="All top suggestions have been selected"
+                poiLoading={poiLoading}
+                poiError={poiError}
+                suggestedStops={visibleSuggestedStops}
+                totalSuggestedStopCount={suggestedStops.length}
+                selectedStops={selectedStops}
+                onToggleStop={toggleSelectedStop}
+              />
+            </CollapsibleSection>
 
-            <View className="mt-4 px-1">
-              <Text className="text-2xl font-bold text-white">
-                More Stops Along Route
-              </Text>
+            <CollapsibleSection
+              title="More Stops Along Route"
+              subtitle="Browse additional stops by category."
+              defaultCollapsed
+            >
+              {!poiLoading && groupedVisibleAllRoutePois.length === 0 && (
+                <View className="rounded-2xl bg-stone-50 p-4">
+                  <Text className="text-stone-600">
+                    No additional stops available for this route.
+                  </Text>
+                </View>
+              )}
 
-              <Text className="mt-1 text-sm text-white">
-                Browse additional stops by category.
-              </Text>
-            </View>
-
-            {!poiLoading && groupedVisibleAllRoutePois.length === 0 && (
-              <View className="my-4 rounded-2xl bg-white p-4 shadow-sm">
-                <Text className="text-stone-600">
-                  No additional stops available for this route.
-                </Text>
-              </View>
-            )}
-
-            {!poiLoading &&
-              groupedVisibleAllRoutePois.map((group) => (
-                <SuggestedStopsList
-                  key={group.category}
-                  title={group.title}
-                  emptyMessage={`No ${group.title.toLowerCase()} found for this route.`}
-                  allSelectedMessage={`All ${group.title.toLowerCase()} have been selected.`}
-                  poiLoading={false}
-                  poiError={null}
-                  suggestedStops={group.stops}
-                  totalSuggestedStopCount={group.stops.length}
-                  selectedStops={selectedStops}
-                  onToggleStop={toggleSelectedStop}
-                  collapsible
-                  defaultCollapsed
-                  stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
-                />
-              ))}
+              {!poiLoading &&
+                groupedVisibleAllRoutePois.map((group) => (
+                  <SuggestedStopsList
+                    key={group.category}
+                    title={group.title}
+                    emptyMessage={`No ${group.title.toLowerCase()} found for this route.`}
+                    allSelectedMessage={`All ${group.title.toLowerCase()} have been selected.`}
+                    poiLoading={false}
+                    poiError={null}
+                    suggestedStops={group.stops}
+                    totalSuggestedStopCount={group.stops.length}
+                    selectedStops={selectedStops}
+                    onToggleStop={toggleSelectedStop}
+                    collapsible
+                    defaultCollapsed
+                    stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
+                  />
+                ))}
+            </CollapsibleSection>
           </>
         )}
-      </ScrollView>
 
-      <View
-        className="border-t border-stone-200 bg-white px-4 pt-3 shadow-lg"
-        style={{ paddingBottom: Math.max(insets.bottom + 16, 24) }}
-      >
-        {finalRouteError && (
-          <Text className="mb-2 text-sm text-red-600">{finalRouteError}</Text>
-        )}
+        <CollapsibleSection
+          title="Trip Actions"
+          subtitle="Build, save, update, or open this route."
+        >
+          {finalRouteError && (
+            <Text className="mb-2 text-sm text-red-600">
+              {finalRouteError}
+            </Text>
+          )}
 
-        {finalRouteData && (
+          {finalRouteData && (
+            <View className="mb-3">
+              <WNButton
+                label="Open in Google Maps"
+                onPress={handleOpenInGoogleMaps}
+              />
+            </View>
+          )}
+
+          {selectedStops.length > 0 && (
+            <View className="mb-3">
+              <WNButton
+                label={
+                  finalRouteLoading
+                    ? "Building Final Route..."
+                    : finalRouteData
+                      ? "Rebuild Final Route"
+                      : "Build Final Route"
+                }
+                onPress={handleBuildFinalRoute}
+                disabled={finalRouteLoading}
+              />
+            </View>
+          )}
+
+          {(saveTripError || savedTripsError) && (
+            <Text className="mb-2 text-sm text-red-600">
+              {saveTripError || savedTripsError}
+            </Text>
+          )}
+
+          {savedTripMessage && (
+            <Text className="mb-2 text-sm font-semibold text-emerald-700">
+              {savedTripMessage}
+            </Text>
+          )}
+
+          {isSavedTripMode &&
+            !hasUnsavedSavedTripChanges &&
+            !savedTripMessage && (
+              <Text className="mb-2 text-sm text-stone-500">
+                Make a change to update this saved trip.
+              </Text>
+            )}
+
           <View className="mb-3">
             <WNButton
-              label="Open in Google Maps"
-              onPress={handleOpenInGoogleMaps}
+              label={
+                savingTrip
+                  ? isSavedTripMode
+                    ? "Updating Trip..."
+                    : "Saving Trip..."
+                  : isSavedTripMode
+                    ? "Update Saved Trip"
+                    : "Save Trip"
+              }
+              onPress={handleSaveTrip}
+              disabled={
+                savingTrip ||
+                (isSavedTripMode && !hasUnsavedSavedTripChanges)
+              }
+              variant="secondary"
             />
           </View>
-        )}
 
-        {selectedStops.length > 0 && (
           <WNButton
-            label={
-              finalRouteLoading
-                ? "Building Final Route..."
-                : finalRouteData
-                  ? "Rebuild Final Route"
-                  : "Build Final Route"
-            }
-            onPress={handleBuildFinalRoute}
-            disabled={finalRouteLoading}
-          />
-        )}
-
-        <View className={selectedStops.length > 0 ? "mt-3" : ""}>
-          <WNButton
-            label="Edit Route"
+            label={isSavedTripMode ? "Back to Saved Trips" : "Edit Route"}
             onPress={handleEditRoute}
             variant="secondary"
           />
-        </View>
-      </View>
+        </CollapsibleSection>
+      </ScrollView>
     </View>
   );
 };

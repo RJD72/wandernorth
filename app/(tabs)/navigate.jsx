@@ -11,9 +11,11 @@ import ScreenIntroCard from "../components/ScreenIntroCard";
 import CurrentLocationToggle from "../components/CurrentLocationToggle";
 import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
+import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
+import { useSavedTripsStore } from "../store/useSavedTripsStore";
 import {
   FEATURES,
   getFeatureLimits,
@@ -56,6 +58,7 @@ const Navigate = () => {
     resetRoutePlanner,
   } = useRoutePlannerStore();
   const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
+  const { clearActiveSavedTrip } = useSavedTripsStore();
 
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -235,6 +238,7 @@ const Navigate = () => {
         }
       }
 
+      clearActiveSavedTrip();
       setActiveRouteRequest({
         source: "navigate",
         startingAddress,
@@ -414,6 +418,8 @@ const Navigate = () => {
             variant="secondary"
           />
         </View>
+
+        <PremiumStatusDevCard />
       </View>
 
     </ScrollView>

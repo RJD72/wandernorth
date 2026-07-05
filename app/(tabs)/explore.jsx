@@ -18,11 +18,13 @@ import CurrentLocationToggle from "../components/CurrentLocationToggle";
 import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import WNTransportSelector from "../components/WNTransportSelector";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
+import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
 
 import { buildGoogleRoute } from "../services/googleRoutes";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
+import { useSavedTripsStore } from "../store/useSavedTripsStore";
 import {
   FEATURES,
   canUseFeature,
@@ -485,6 +487,7 @@ const Explore = () => {
     resetRoutePlanner,
   } = useRoutePlannerStore();
   const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
+  const { clearActiveSavedTrip } = useSavedTripsStore();
 
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -619,6 +622,7 @@ const Explore = () => {
         startingAddress || "your start"
       }`;
 
+      clearActiveSavedTrip();
       setActiveRouteRequest({
         source: "explore",
         startingAddress,
@@ -785,6 +789,8 @@ const Explore = () => {
             variant="secondary"
           />
         </View>
+
+        <PremiumStatusDevCard />
       </View>
 
     </ScrollView>
