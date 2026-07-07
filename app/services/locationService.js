@@ -1,5 +1,7 @@
 import * as Location from "expo-location";
 
+import { logger } from "../utils/logger";
+
 export async function geocodeAddress(address) {
   if (!address?.trim()) return null;
 
@@ -13,7 +15,7 @@ export async function geocodeAddress(address) {
       longitude: results[0].longitude,
     };
   } catch (error) {
-    console.log("[locationService] Geocode error:", error);
+    logger.log("[locationService] Geocode error:", error);
     return null;
   }
 }
@@ -53,7 +55,7 @@ export async function getCurrentLocationWithLabel() {
       coords: { latitude, longitude },
     };
   } catch (error) {
-    console.log("[locationService] Current location error:", error);
+    logger.log("[locationService] Current location error:", error);
 
     return {
       ok: false,

@@ -19,6 +19,7 @@ import {
   getStopId,
   getStopTitle,
 } from "../utils/stopUtils";
+import { logger } from "../utils/logger";
 
 function getStopDescription(stop) {
   if (!stop) return "No description available.";
@@ -152,7 +153,7 @@ const SuggestedStopsList = ({
         return;
       }
 
-      console.log("Google place details error:", error);
+      logger.log("Google place details error:", error);
       setDetailsError("Could not load extra details for this stop.");
     } finally {
       if (latestDetailsRequestId.current === requestId) {

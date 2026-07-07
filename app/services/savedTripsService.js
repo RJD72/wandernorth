@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { logger } from "../utils/logger";
+
 const SAVED_TRIPS_STORAGE_KEY = "wanderNorth.savedTrips.v1";
 const VALID_TRIP_SOURCES = new Set(["navigate", "explore"]);
 
@@ -54,7 +56,7 @@ async function readSavedTripsFromStorage() {
   try {
     parsedTrips = JSON.parse(storedTrips);
   } catch (error) {
-    console.warn("[savedTripsService] loadSavedTrips invalid JSON:", error);
+    logger.warn("[savedTripsService] loadSavedTrips invalid JSON:", error);
     return [];
   }
 
@@ -69,7 +71,7 @@ export async function loadSavedTrips() {
   try {
     return await readSavedTripsFromStorage();
   } catch (error) {
-    console.warn("[savedTripsService] loadSavedTrips error:", error);
+    logger.warn("[savedTripsService] loadSavedTrips error:", error);
     return [];
   }
 }
@@ -107,7 +109,7 @@ export async function saveTrip(savedTrip) {
 
     return normalizedTrip;
   } catch (error) {
-    console.warn("[savedTripsService] saveTrip error:", error);
+    logger.warn("[savedTripsService] saveTrip error:", error);
     return null;
   }
 }
@@ -126,7 +128,7 @@ export async function deleteSavedTrip(savedTripId) {
 
     return true;
   } catch (error) {
-    console.warn("[savedTripsService] deleteSavedTrip error:", error);
+    logger.warn("[savedTripsService] deleteSavedTrip error:", error);
     return false;
   }
 }
@@ -160,7 +162,7 @@ export async function updateSavedTrip(savedTripId, updates) {
 
     return updatedTrip;
   } catch (error) {
-    console.warn("[savedTripsService] updateSavedTrip error:", error);
+    logger.warn("[savedTripsService] updateSavedTrip error:", error);
     return null;
   }
 }
@@ -170,7 +172,7 @@ export async function clearSavedTrips() {
     await AsyncStorage.removeItem(SAVED_TRIPS_STORAGE_KEY);
     return true;
   } catch (error) {
-    console.warn("[savedTripsService] clearSavedTrips error:", error);
+    logger.warn("[savedTripsService] clearSavedTrips error:", error);
     return false;
   }
 }

@@ -35,6 +35,7 @@ import {
   geocodeAddress,
   getCurrentLocationWithLabel,
 } from "../services/locationService";
+import { logger } from "../utils/logger";
 
 const DIRECTIONS = [
   {
@@ -248,7 +249,7 @@ async function findBestExploreDestination({
 
       successfulCandidates.push(successfulCandidate);
 
-      console.log("[Explore] Candidate route succeeded:", {
+      logger.log("[Explore] Candidate route succeeded:", {
         direction: directionConfig.key,
         bearingDegrees: candidate.bearingDegrees,
         distanceKm: candidate.distanceKm,
@@ -283,7 +284,7 @@ async function findBestExploreDestination({
         return successfulCandidate;
       }
     } catch (error) {
-      console.log("[Explore] Candidate route failed:", {
+      logger.log("[Explore] Candidate route failed:", {
         direction: directionConfig.key,
         bearingDegrees: candidate.bearingDegrees,
         distanceKm: candidate.distanceKm,
@@ -555,7 +556,7 @@ const Explore = () => {
 
       return true;
     } catch (error) {
-      console.log("Explore location error:", error);
+      logger.log("Explore location error:", error);
 
       Alert.alert(
         "Location error",

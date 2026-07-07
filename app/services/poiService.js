@@ -11,6 +11,8 @@
  * 5. The final list is returned to route.jsx.
  */
 
+import { logger } from "../utils/logger";
+
 const GOOGLE_PLACES_NEARBY_URL =
   "https://places.googleapis.com/v1/places:searchNearby";
 
@@ -234,7 +236,7 @@ async function fetchNearbyPlacesForPoint({
 
   const data = await response.json();
 
-  console.log("[poiService] Google Places raw result:", {
+  logger.log("[poiService] Google Places raw result:", {
     googleType,
     radiusMeters,
     point,
@@ -244,7 +246,7 @@ async function fetchNearbyPlacesForPoint({
   });
 
   if (!response.ok) {
-    console.log("[poiService] Google Places error:", data);
+    logger.log("[poiService] Google Places error:", data);
     throw new Error(data.error?.message || "Google Places request failed.");
   }
 
@@ -391,7 +393,7 @@ export async function fetchPoisNearRoutePoints({
   const googleTypes = getGooglePlaceTypes(selectedPoiTypes);
 
   if (googleTypes.length === 0) {
-    console.log(
+    logger.log(
       "[poiService] No valid Google POI types found for:",
       selectedPoiTypes,
     );
@@ -411,13 +413,13 @@ export async function fetchPoisNearRoutePoints({
     MAX_POI_TYPES_TO_SEARCH,
   );
 
-  console.log(
+  logger.log(
     "[poiService] Incoming sampled route points:",
     routePoints.length,
   );
-  console.log("[poiService] Points actually searched:", pointsToSearch.length);
-  console.log("[poiService] Types actually searched:", typesToSearch);
-  console.log(
+  logger.log("[poiService] Points actually searched:", pointsToSearch.length);
+  logger.log("[poiService] Types actually searched:", typesToSearch);
+  logger.log(
     "[poiService] Search request count:",
     pointsToSearch.length * typesToSearch.length,
   );
@@ -446,7 +448,7 @@ export async function fetchPoisNearRoutePoints({
       return result.value;
     }
 
-    console.log("[poiService] One POI request failed:", result.reason);
+    logger.log("[poiService] One POI request failed:", result.reason);
     return [];
   });
 

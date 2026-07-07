@@ -27,6 +27,7 @@ import {
   getCurrentLocationWithLabel,
 } from "../services/locationService";
 import { canBuildGoogleRoute } from "../services/googleRoutes";
+import { logger } from "../utils/logger";
 
 const TRANSPORT_OPTIONS = [
   { key: "driving", label: "Drive", icon: "car" },
@@ -163,7 +164,7 @@ const Navigate = () => {
 
       return true;
     } catch (error) {
-      console.log("Navigate location error:", error);
+      logger.log("Navigate location error:", error);
 
       Alert.alert(
         "Location error",

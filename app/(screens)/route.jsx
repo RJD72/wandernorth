@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Linking,
-  Pressable,
   Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -19,6 +18,7 @@ import WNButton from "../components/WNButton";
 import SelectedStopsList from "../components/SelectedStopsList";
 import AddCustomStopCard from "../components/AddCustomStopCard";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
+import CollapsibleSection from "../components/CollapsibleSection";
 
 import { buildGoogleRoute } from "../services/googleRoutes";
 import {
@@ -41,6 +41,7 @@ import { chooseDistributedStops } from "../utils/poiScoring";
 import { isValidCoords } from "../utils/coordinates";
 import { getStopCoords, getStopId } from "../utils/stopUtils";
 import { MAX_DISTANCE_FROM_ROUTE_METERS } from "../utils/poiDistancePolicy";
+import { logger } from "../utils/logger";
 
 const EMPTY_SELECTED_POI_TYPES = [];
 
@@ -125,39 +126,6 @@ function formatCategoryTitle(category) {
     String(category)
       .replaceAll("_", " ")
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
-  );
-}
-
-function CollapsibleSection({
-  title,
-  subtitle,
-  defaultCollapsed = false,
-  children,
-}) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
-
-  return (
-    <View className="mt-4 overflow-hidden rounded-2xl bg-white shadow-sm">
-      <Pressable
-        onPress={() => setCollapsed((current) => !current)}
-        accessibilityRole="button"
-        accessibilityLabel={`${collapsed ? "Expand" : "Collapse"} ${title}`}
-        className="flex-row items-center justify-between px-4 py-4"
-      >
-        <View className="flex-1 pr-3">
-          <Text className="text-lg font-bold text-emerald-950">{title}</Text>
-          {subtitle ? (
-            <Text className="mt-1 text-sm text-stone-600">{subtitle}</Text>
-          ) : null}
-        </View>
-
-        <Text className="text-xl font-bold text-emerald-950">
-          {collapsed ? "+" : "−"}
-        </Text>
-      </Pressable>
-
-      {!collapsed && <View className="px-4 pb-4">{children}</View>}
-    </View>
   );
 }
 
@@ -291,7 +259,7 @@ const Route = () => {
     try {
       await Linking.openURL(url);
     } catch (error) {
-      console.log("Open Google Maps error:", error);
+      logger.log("Open Google Maps error:", error);
     }
   }
 
@@ -546,7 +514,7 @@ const Route = () => {
         });
       } catch (error) {
         if (!isCurrent) return;
-        console.log("Route build error", error);
+        logger.log("Route build error", error);
         setError(
           requestedSavedTripMode
             ? "Unable to reopen this saved trip. The saved route data is incomplete."
@@ -627,7 +595,7 @@ const Route = () => {
           );
         });
 
-        console.log(
+        logger.log(
           "[route] Nearby POIs by progress:",
           nearbyRoutePois
             .map((poi) => ({
@@ -648,7 +616,7 @@ const Route = () => {
 
         setAllRoutePois(nearbyRoutePois);
 
-        console.log("[route] All route POIs cached:", nearbyRoutePois.length);
+        logger.log("[route] All route POIs cached:", nearbyRoutePois.length);
 
         const distributedStops = chooseDistributedStops(
           nearbyRoutePois,
@@ -661,9 +629,9 @@ const Route = () => {
 
         setSuggestedStops(distributedStops);
 
-        console.log("[route] POI candidates:", nearbyRoutePois.length);
-        console.log("[route] Distributed POIs:", distributedStops.length);
-        console.log(
+        logger.log("[route] POI candidates:", nearbyRoutePois.length);
+        logger.log("[route] Distributed POIs:", distributedStops.length);
+        logger.log(
           "[route] Distributed POI details:",
           distributedStops.map((stop) => ({
             name: stop.name,
@@ -678,7 +646,7 @@ const Route = () => {
       } catch (error) {
         if (!isCurrent) return;
 
-        console.log("Suggested stops error:", error);
+        logger.log("Suggested stops error:", error);
         setSuggestedStops([]);
         setAllRoutePois([]);
         setPoiError("Unable to load suggested stops.");
@@ -760,7 +728,7 @@ const Route = () => {
         selectedStops,
       });
     } catch (error) {
-      console.log("Final route build error:", error);
+      logger.log("Final route build error:", error);
       setFinalRouteError("Failed to build final route with selected stops.");
     } finally {
       setFinalRouteLoading(false);
@@ -797,7 +765,10 @@ const Route = () => {
     const routeToSave = finalRouteData;
     const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
     const savedTripPayload = {
-      title: buildSavedTripTitle(routeData.parsedParams),
+      title: isSavedTripMode
+        ? activeSavedTrip?.title ||
+          buildSavedTripTitle(routeData.parsedParams)
+        : buildSavedTripTitle(routeData.parsedParams),
       source: routeData.parsedParams?.source ?? "unknown",
       routeRequest: {
         ...routeData.parsedParams,
@@ -856,7 +827,7 @@ const Route = () => {
 
       return savedTrip;
     } catch (error) {
-      console.warn("[route] Save/update trip error:", error);
+      logger.warn("[route] Save/update trip error:", error);
       setSaveTripError(
         isSavedTripMode
           ? "Unable to update saved trip."

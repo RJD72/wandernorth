@@ -7,6 +7,7 @@ import {
   saveTrip,
   updateSavedTrip,
 } from "../services/savedTripsService";
+import { logger } from "../utils/logger";
 
 export const useSavedTripsStore = create((set) => ({
   savedTrips: [],
@@ -29,7 +30,7 @@ export const useSavedTripsStore = create((set) => ({
       set({ savedTrips });
       return savedTrips;
     } catch (error) {
-      console.warn("[useSavedTripsStore] loadTrips error:", error);
+      logger.warn("[useSavedTripsStore] loadTrips error:", error);
       set({ savedTripsError: "Unable to load saved trips." });
       return [];
     } finally {
@@ -52,7 +53,7 @@ export const useSavedTripsStore = create((set) => ({
       set({ savedTrips });
       return savedTrip;
     } catch (error) {
-      console.warn("[useSavedTripsStore] addTrip error:", error);
+      logger.warn("[useSavedTripsStore] addTrip error:", error);
       set({ savedTripsError: "Unable to save trip." });
       return null;
     }
@@ -74,7 +75,7 @@ export const useSavedTripsStore = create((set) => ({
       }));
       return true;
     } catch (error) {
-      console.warn("[useSavedTripsStore] removeTrip error:", error);
+      logger.warn("[useSavedTripsStore] removeTrip error:", error);
       set({ savedTripsError: "Unable to delete saved trip." });
       return false;
     }
@@ -95,7 +96,7 @@ export const useSavedTripsStore = create((set) => ({
       set({ savedTrips });
       return updatedTrip;
     } catch (error) {
-      console.warn("[useSavedTripsStore] updateTrip error:", error);
+      logger.warn("[useSavedTripsStore] updateTrip error:", error);
       set({ savedTripsError: "Unable to update saved trip." });
       return null;
     }
@@ -115,7 +116,7 @@ export const useSavedTripsStore = create((set) => ({
       set({ savedTrips: [] });
       return true;
     } catch (error) {
-      console.warn("[useSavedTripsStore] clearTrips error:", error);
+      logger.warn("[useSavedTripsStore] clearTrips error:", error);
       set({ savedTripsError: "Unable to clear saved trips." });
       return false;
     }

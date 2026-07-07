@@ -9,6 +9,8 @@
 
 // The API key is read from an Expo public environment variable so it is never
 // hard-coded in source. Expo inline EXPO_PUBLIC_* variables at build time.
+import { logger } from "../utils/logger";
+
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 // ---------------------------------------------------------------------------
@@ -147,7 +149,7 @@ export async function buildGoogleRoute({
   // Handle HTTP-level errors (4xx / 5xx). The API returns a structured error
   // object under data.error when this happens.
   if (!response.ok) {
-    console.error("Google Routes API error", data);
+    logger.error("Google Routes API error", data);
     throw new Error(data?.error?.message || "Google route request failed");
   }
 

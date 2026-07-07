@@ -8,6 +8,7 @@ import {
   Keyboard,
 } from "react-native";
 import WNInput from "./WNInput";
+import { logger } from "../utils/logger";
 
 const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
 const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
@@ -283,7 +284,7 @@ export default function AutocompleteInput({
         return;
       }
 
-      console.log("Autocomplete error:", err);
+      logger.log("Autocomplete error:", err);
       setPredictions([]);
       setShowList(false);
     } finally {
@@ -324,7 +325,7 @@ export default function AutocompleteInput({
         };
       }
     } catch (err) {
-      console.log("Place details error:", err);
+      logger.log("Place details error:", err);
     }
 
     return null;
