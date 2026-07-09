@@ -53,6 +53,10 @@ function clamp(value, min, max) {
 function getPoiId(poi) {
   if (!poi) return null;
 
+  if (poi.provider && poi.providerPlaceId) {
+    return `${poi.provider}:${poi.providerPlaceId}`;
+  }
+
   return (
     poi.googlePlaceId ??
     poi.placeId ??

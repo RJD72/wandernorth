@@ -171,8 +171,8 @@ const Route = () => {
   const requestedSavedTripMode = mode === "savedTrip";
   const isSavedTripMode = Boolean(
     requestedSavedTripMode &&
-      activeSavedTrip &&
-      activeSavedTrip.id === savedTripId,
+    activeSavedTrip &&
+    activeSavedTrip.id === savedTripId,
   );
   const routeRequest = isSavedTripMode
     ? activeSavedTrip.routeRequest
@@ -531,12 +531,7 @@ const Route = () => {
     return () => {
       isCurrent = false;
     };
-  }, [
-    activeSavedTrip,
-    isSavedTripMode,
-    requestedSavedTripMode,
-    routeRequest,
-  ]);
+  }, [activeSavedTrip, isSavedTripMode, requestedSavedTripMode, routeRequest]);
 
   // Effect 2: Load POIs whenever a route is available.
   // Current implementation is a placeholder so the screen structure is ready
@@ -766,8 +761,7 @@ const Route = () => {
     const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
     const savedTripPayload = {
       title: isSavedTripMode
-        ? activeSavedTrip?.title ||
-          buildSavedTripTitle(routeData.parsedParams)
+        ? activeSavedTrip?.title || buildSavedTripTitle(routeData.parsedParams)
         : buildSavedTripTitle(routeData.parsedParams),
       source: routeData.parsedParams?.source ?? "unknown",
       routeRequest: {
@@ -1093,9 +1087,7 @@ const Route = () => {
           subtitle="Build, save, update, or open this route."
         >
           {finalRouteError && (
-            <Text className="mb-2 text-sm text-red-600">
-              {finalRouteError}
-            </Text>
+            <Text className="mb-2 text-sm text-red-600">{finalRouteError}</Text>
           )}
 
           {finalRouteData && (
@@ -1156,8 +1148,7 @@ const Route = () => {
               }
               onPress={handleSaveTrip}
               disabled={
-                savingTrip ||
-                (isSavedTripMode && !hasUnsavedSavedTripChanges)
+                savingTrip || (isSavedTripMode && !hasUnsavedSavedTripChanges)
               }
               variant="secondary"
             />

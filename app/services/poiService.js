@@ -1,258 +1,28 @@
 /**
  * services/poiService.js
  *
- * Fetches real POIs near sampled route points using Google Places Nearby Search (New).
+ * Fetches real POIs near sampled route points using the active POI provider.
  *
  * Current strategy:
  * 1. route.jsx samples a few points along the route.
  * 2. This service searches near each sample point.
  * 3. Results are normalized into one simple app-friendly shape.
- * 4. Duplicate Google places are removed.
+ * 4. Duplicate places are removed.
  * 5. The final list is returned to route.jsx.
  */
 
 import { logger } from "../utils/logger";
-
-const GOOGLE_PLACES_NEARBY_URL =
-  "https://places.googleapis.com/v1/places:searchNearby";
-
-/**
- * Map your app's POI type ids to Google Places API types.
- *
- * Important:
- * These values must be valid Google Places "includedTypes" values.
- * Keep this simple at first.
- */
-const GOOGLE_PLACE_TYPE_MAP = {
-  "cafe": "cafe",
-  "coffee": "cafe",
-  "coffee_shop": "cafe",
-
-  "restaurant": "restaurant",
-  "restaurants": "restaurant",
-  "food": "restaurant",
-
-  "bar": "bar",
-  "bars": "bar",
-
-  "attraction": "tourist_attraction",
-  "attractions": "tourist_attraction",
-  "tourist_attraction": "tourist_attraction",
-
-  "park": "park",
-  "parks": "park",
-
-  "museum": "museum",
-  "museums": "museum",
-
-  "lodging": "lodging",
-  "hotel": "lodging",
-  "hotels": "lodging",
-  "motel": "lodging",
-  "motels": "lodging",
-
-  "gas": "gas_station",
-  "gas_station": "gas_station",
-  "gas_stations": "gas_station",
-  "gas station": "gas_station",
-  "fuel": "gas_station",
-};
-
-/**
- * Fallback types when the user has not selected any POI filters.
- *
- * Keep this conservative so you don't burn API calls or return chaos.
- */
-const DEFAULT_GOOGLE_TYPES = ["cafe", "restaurant", "tourist_attraction"];
+import {
+  activePoiProviders,
+  primaryPoiProvider,
+} from "./poiProviders";
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
 const MAX_ROUTE_POINTS_TO_SEARCH = 5;
 const MAX_POI_TYPES_TO_SEARCH = 2;
 
-/**
- * Converts app POI type ids into Google Places API types.
- *
- * Why this exists:
- * UI filters use app-facing ids (for example: "attraction"), while Google
- * Nearby Search expects specific Place type strings (for example:
- * "tourist_attraction"). This translation layer keeps Google-specific naming
- * isolated to the service layer.
- *
- * Unknown app ids are dropped and duplicate Google types are removed.
- *
- * @param {string[]} selectedPoiTypes
- * @returns {string[]} Google Places includedTypes values
- */
 export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
-  if (!Array.isArray(selectedPoiTypes)) {
-    return [];
-  }
-
-  const mappedTypes = selectedPoiTypes
-    .map((type) => GOOGLE_PLACE_TYPE_MAP[String(type).trim().toLowerCase()])
-    .filter(Boolean);
-
-  return [...new Set(mappedTypes)];
-}
-
-function getGooglePlaceTypes(selectedPoiTypes = []) {
-  const mappedTypes = normalizeSelectedPoiTypes(selectedPoiTypes);
-
-  return mappedTypes.length > 0 ? mappedTypes : DEFAULT_GOOGLE_TYPES;
-}
-
-function prioritizeGoogleTypesForSearch(
-  googleTypes = [],
-  selectedPoiTypes = [],
-) {
-  const uniqueGoogleTypes = [...new Set(googleTypes)];
-
-  const explicitlySelectedRestaurant =
-    Array.isArray(selectedPoiTypes) &&
-    selectedPoiTypes.some((type) => {
-      const normalizedType = String(type).trim().toLowerCase();
-      return GOOGLE_PLACE_TYPE_MAP[normalizedType] === "restaurant";
-    });
-
-  if (!explicitlySelectedRestaurant) {
-    return uniqueGoogleTypes;
-  }
-
-  return [
-    "restaurant",
-    ...uniqueGoogleTypes.filter((type) => type !== "restaurant"),
-  ];
-}
-
-/**
- * Normalizes a Google Place object into the shape your app expects.
- *
- * Why this exists:
- * Google API responses are rich and nested. UI components and store logic are
- * easier to maintain when they receive one stable object shape.
- *
- * Validation note:
- * A place without valid coordinates is not usable on maps or route overlays,
- * so we return null and let the caller filter it out.
- *
- * @param {object} place Raw place from Google Places Nearby Search
- * @param {string} fallbackCategory Type requested in the current query
- * @returns {object|null} Normalized POI object or null when unusable
- */
-function normalizeGooglePlace(place, fallbackCategory) {
-  const latitude = place.location?.latitude;
-  const longitude = place.location?.longitude;
-
-  if (typeof latitude !== "number" || typeof longitude !== "number") {
-    return null;
-  }
-
-  return {
-    id: place.id,
-    googlePlaceId: place.id,
-
-    name: place.displayName?.text || "Unnamed place",
-    category: fallbackCategory || place.primaryType || "place",
-    googlePrimaryType: place.primaryType || null,
-    address: place.formattedAddress || "",
-
-    latitude,
-    longitude,
-
-    rating: place.rating ?? null,
-    userRatingCount: place.userRatingCount ?? null,
-    googleMapsUri: place.googleMapsUri || null,
-  };
-}
-
-/**
- * Fetches nearby places around one route sample point for one Google type.
- *
- * Request strategy:
- * - Each call targets one (point, type) pair.
- * - rankPreference "DISTANCE" prioritizes places closer to the point over purely
- *   popular places, which generally gives better stop recommendations.
- * - A small field mask limits payload size and billing scope.
- *
- * Error behavior:
- * - Missing API key throws immediately with a clear setup message.
- * - Non-2xx Google responses are logged and re-thrown with the API message.
- * - Successful responses are normalized and invalid records are filtered out.
- *
- * @param {object} args
- * @param {{ latitude: number, longitude: number }} args.point
- * @param {string} args.googleType
- * @param {number} [args.radiusMeters=3000]
- * @param {number} [args.maxResultCount=5]
- * @returns {Promise<object[]>}
- */
-async function fetchNearbyPlacesForPoint({
-  point,
-  googleType,
-  radiusMeters = 3000,
-  maxResultCount = 5,
-}) {
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY. Add it to your .env file.",
-    );
-  }
-
-  const response = await fetch(GOOGLE_PLACES_NEARBY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-
-      /**
-       * Keep this field mask lean.
-       * More fields can increase cost and payload size.
-       *
-       * We include only what downstream screens need now:
-       * identity, display text, coordinates, category, lightweight quality
-       * signals, and a maps deep link.
-       */
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri",
-    },
-    body: JSON.stringify({
-      includedTypes: [googleType],
-      maxResultCount,
-      rankPreference: "DISTANCE",
-      regionCode: "CA",
-      locationRestriction: {
-        circle: {
-          center: {
-            latitude: point.latitude,
-            longitude: point.longitude,
-          },
-          radius: radiusMeters,
-        },
-      },
-    }),
-  });
-
-  const data = await response.json();
-
-  logger.log("[poiService] Google Places raw result:", {
-    googleType,
-    radiusMeters,
-    point,
-    status: response.status,
-    placeCount: data.places?.length ?? 0,
-    firstPlace: data.places?.[0]?.displayName?.text ?? null,
-  });
-
-  if (!response.ok) {
-    logger.log("[poiService] Google Places error:", data);
-    throw new Error(data.error?.message || "Google Places request failed.");
-  }
-
-  return (data.places || [])
-    .map((place) => normalizeGooglePlace(place, googleType))
-    .filter(Boolean);
+  return primaryPoiProvider.normalizeSelectedPoiTypes(selectedPoiTypes);
 }
 
 /**
@@ -263,7 +33,7 @@ async function fetchNearbyPlacesForPoint({
  * can therefore appear in several Nearby Search responses.
  *
  * Dedupe policy:
- * - Prefer googlePlaceId, fallback to id.
+ * - Prefer provider-aware ids, fallback to googlePlaceId, then id.
  * - Drop records that have no stable id.
  * - Keep the first occurrence and skip subsequent duplicates.
  *
@@ -274,7 +44,10 @@ function dedupePois(pois = []) {
   const seen = new Set();
 
   return pois.filter((poi) => {
-    const key = poi.googlePlaceId || poi.id;
+    const key =
+      poi.provider && poi.providerPlaceId
+        ? `${poi.provider}:${poi.providerPlaceId}`
+        : poi.googlePlaceId || poi.id;
 
     if (!key) return false;
     if (seen.has(key)) return false;
@@ -317,40 +90,16 @@ function getEvenlySpacedRoutePoints(routePoints = [], maxPoints = 3) {
   });
 }
 
-function getSearchRadiusForType(googleType) {
-  const type = String(googleType || "").toLowerCase();
-
-  /**
-   * Restaurants, gas, and lodging are often clustered around towns,
-   * not exactly beside the sampled highway coordinate
-   */
-  if (
-    type === "restaurant" ||
-    type === "cafe" ||
-    type === "bar" ||
-    type === "lodging" ||
-    type === "gas_station"
-  ) {
-    return 6000;
-  }
-
-  /**
-   * Parks and attractions can stay tighter because a huge radius can pull in
-   * unrelated outdoor areas that are not really route-relevant
-   */
-  return 3500;
-}
-
 /**
  * Main function used by route.jsx.
  *
  * End-to-end flow:
- * 1. Validate route points and resolve Google types.
+ * 1. Validate route points and resolve provider types.
  * 2. Apply temporary call caps to control API cost/latency during iteration.
  * 3. Build a request matrix of (point x type).
  * 4. Execute all requests concurrently with Promise.allSettled so one failing
  *    request does not fail the whole batch.
- * 5. Flatten successful results, de-duplicate, and return the top N stops.
+ * 5. Flatten successful results, de-duplicate, and return the candidate pool.
  *
  * About numStops:
  * - Coerced with Number(...) to accept numeric strings from UI controls.
@@ -390,53 +139,57 @@ export async function fetchPoisNearRoutePoints({
     return [];
   }
 
-  const googleTypes = getGooglePlaceTypes(selectedPoiTypes);
-
-  if (googleTypes.length === 0) {
-    logger.log(
-      "[poiService] No valid Google POI types found for:",
-      selectedPoiTypes,
-    );
-    return [];
-  }
-
   const pointsToSearch = getEvenlySpacedRoutePoints(
     routePoints,
     MAX_ROUTE_POINTS_TO_SEARCH,
-  );
-  const prioritizedGoogleTypes = prioritizeGoogleTypesForSearch(
-    googleTypes,
-    selectedPoiTypes,
-  );
-  const typesToSearch = prioritizedGoogleTypes.slice(
-    0,
-    MAX_POI_TYPES_TO_SEARCH,
-  );
-
-  logger.log(
-    "[poiService] Incoming sampled route points:",
-    routePoints.length,
-  );
-  logger.log("[poiService] Points actually searched:", pointsToSearch.length);
-  logger.log("[poiService] Types actually searched:", typesToSearch);
-  logger.log(
-    "[poiService] Search request count:",
-    pointsToSearch.length * typesToSearch.length,
   );
 
   // Build all request promises first so they can execute in parallel.
   const requests = [];
 
-  for (const point of pointsToSearch) {
-    for (const googleType of typesToSearch) {
-      requests.push(
-        fetchNearbyPlacesForPoint({
-          point,
-          googleType,
-          radiusMeters: getSearchRadiusForType(googleType),
-          maxResultCount: 5,
-        }),
+  for (const provider of activePoiProviders) {
+    const providerTypes = provider.getProviderPoiTypes(selectedPoiTypes);
+
+    if (providerTypes.length === 0) {
+      logger.log(
+        "[poiService] No valid Google POI types found for:",
+        selectedPoiTypes,
       );
+      continue;
+    }
+
+    const prioritizedProviderTypes =
+      provider.prioritizeProviderPoiTypesForSearch(
+        providerTypes,
+        selectedPoiTypes,
+      );
+    const typesToSearch = prioritizedProviderTypes.slice(
+      0,
+      MAX_POI_TYPES_TO_SEARCH,
+    );
+
+    logger.log(
+      "[poiService] Incoming sampled route points:",
+      routePoints.length,
+    );
+    logger.log("[poiService] Points actually searched:", pointsToSearch.length);
+    logger.log("[poiService] Types actually searched:", typesToSearch);
+    logger.log(
+      "[poiService] Search request count:",
+      pointsToSearch.length * typesToSearch.length,
+    );
+
+    for (const point of pointsToSearch) {
+      for (const providerType of typesToSearch) {
+        requests.push(
+          provider.fetchPoisForRoutePointAndType({
+            point,
+            providerType,
+            radiusMeters: provider.getSearchRadiusForType(providerType),
+            maxResultCount: 5,
+          }),
+        );
+      }
     }
   }
 

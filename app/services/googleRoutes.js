@@ -12,6 +12,8 @@
 import { logger } from "../utils/logger";
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+const ANDROID_PACKAGE_NAME = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
+const ANDROID_CERT_SHA1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
 
 // ---------------------------------------------------------------------------
 // convertModeToGoogleMode
@@ -131,6 +133,8 @@ export async function buildGoogleRoute({
       // Required for authentication and billing.
       // Make sure to restrict this key in production!
       "X-Goog-Api-Key": GOOGLE_API_KEY,
+      "X-Android-Package": ANDROID_PACKAGE_NAME,
+      "X-Android-Cert": ANDROID_CERT_SHA1,
 
       // FieldMask controls which fields Google includes in the response.
       // Specifying only what we need reduces bandwidth and latency.

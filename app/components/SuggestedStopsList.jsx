@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -49,6 +49,79 @@ function getStopImage(stop) {
     stop.photos?.[0]?.photoUrl ??
     stop.imageUrls?.[0] ??
     null
+  );
+}
+
+function isGooglePlacesPhotoUrl(imageUrl) {
+  return (
+    typeof imageUrl === "string" && imageUrl.includes("places.googleapis.com")
+  );
+}
+
+function getUniqueImageUrls(imageUrls = []) {
+  return [...new Set(imageUrls.filter(Boolean))];
+}
+
+function PlacePhotoArea({ imageUrls = [], googleMapsUri }) {
+  const [failedImageUrl, setFailedImageUrl] = useState(null);
+  const usableImageUrl = getUniqueImageUrls(imageUrls).find((imageUrl) => {
+    return !isGooglePlacesPhotoUrl(imageUrl) && imageUrl !== failedImageUrl;
+  });
+
+  async function openGoogleMaps() {
+    if (!googleMapsUri) return;
+
+    try {
+      await Linking.openURL(googleMapsUri);
+    } catch (error) {
+      logger.warn("Open Google Maps place details error:", error);
+    }
+  }
+
+  if (usableImageUrl) {
+    return (
+      <Image
+        source={{ uri: usableImageUrl }}
+        className="h-48 w-full rounded-2xl bg-emerald-50"
+        resizeMode="cover"
+        onError={(error) => {
+          setFailedImageUrl(usableImageUrl);
+          logger.warn("Place photo image load error:", error?.nativeEvent);
+        }}
+      />
+    );
+  }
+
+  return (
+    <View className="w-full items-center justify-center rounded-2xl bg-stone-100 px-4 py-6">
+      <View className="h-12 w-12 items-center justify-center rounded-full bg-white">
+        <MaterialCommunityIcons
+          name="image-off-outline"
+          size={24}
+          color="#57534e"
+        />
+      </View>
+
+      <Text className="mt-3 text-base font-bold text-stone-900">
+        Photo unavailable
+      </Text>
+
+      <Text className="mt-1 text-center text-sm text-stone-600">
+        View on Google Maps for more details.
+      </Text>
+
+      {googleMapsUri ? (
+        <Pressable
+          onPress={openGoogleMaps}
+          accessibilityRole="button"
+          className="mt-4 rounded-full bg-emerald-50 px-4 py-2"
+        >
+          <Text className="text-sm font-bold text-emerald-950">
+            Open in Google Maps
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -171,8 +244,13 @@ const SuggestedStopsList = ({
   const modalDescription =
     activeStopDetails?.description ?? getStopDescription(activeStop);
 
-  const modalImageUrl =
-    activeStopDetails?.imageUrls?.[0] ?? getStopImage(activeStop);
+  const modalImageUrls = getUniqueImageUrls([
+    ...(activeStopDetails?.imageUrls ?? []),
+    getStopImage(activeStop),
+  ]);
+
+  const modalGoogleMapsUri =
+    activeStopDetails?.googleMapsUri ?? activeStop?.googleMapsUri ?? null;
 
   const modalRating = activeStopDetails?.rating ?? activeStop?.rating ?? null;
 
@@ -294,38 +372,10 @@ const SuggestedStopsList = ({
           <View className="max-h-[85%] rounded-t-3xl bg-white">
             {activeStop && (
               <ScrollView className="p-5">
-                {activeStopDetails?.imageUrls?.length > 0 ? (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    className="mb-4"
-                  >
-                    {activeStopDetails.imageUrls.map((imageUrl, index) => (
-                      <Image
-                        key={`${imageUrl}-${index}`}
-                        source={{ uri: imageUrl }}
-                        className="mr-3 h-48 w-72 rounded-2xl bg-emerald-50"
-                        resizeMode="cover"
-                      />
-                    ))}
-                  </ScrollView>
-                ) : modalImageUrl ? (
-                  <Image
-                    source={{ uri: modalImageUrl }}
-                    className="h-48 w-full rounded-2xl bg-emerald-50"
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View className="h-32 w-full items-center justify-center rounded-2xl bg-emerald-50">
-                    {detailsLoading ? (
-                      <ActivityIndicator />
-                    ) : (
-                      <Text className="text-stone-600">
-                        No image available
-                      </Text>
-                    )}
-                  </View>
-                )}
+                <PlacePhotoArea
+                  imageUrls={modalImageUrls}
+                  googleMapsUri={modalGoogleMapsUri}
+                />
 
                 {detailsLoading && (
                   <Text className="mt-3 text-sm text-stone-600">

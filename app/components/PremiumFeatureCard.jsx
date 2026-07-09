@@ -11,7 +11,7 @@ export default function PremiumFeatureCard({
 }) {
   const canClose = typeof onClose === "function";
   const canEnablePremiumForTesting =
-    showDevToggle && typeof onEnablePremiumForTesting === "function";
+    __DEV__ && showDevToggle && typeof onEnablePremiumForTesting === "function";
 
   return (
     <Modal

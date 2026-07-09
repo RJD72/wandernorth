@@ -9,9 +9,24 @@ import {
 } from "react-native";
 import WNInput from "./WNInput";
 import { logger } from "../utils/logger";
+import { get } from "react-native/Libraries/TurboModule/TurboModuleRegistry";
 
 const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
 const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
+
+function getAndroidRestrictionHeaders() {
+  const androidPackageName = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
+  const androidCertSha1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
+
+  if (!androidPackageName || !androidCertSha1) {
+    return {};
+  }
+
+  return {
+    "X-Android-Package": androidPackageName,
+    "X-Android-Cert": androidCertSha1,
+  };
+}
 
 function isValidSearchPoint(point) {
   return (
@@ -68,6 +83,7 @@ async function fetchRouteTextSearchPredictions({
           headers: {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": apiKey,
+            ...getAndroidRestrictionHeaders(),
             "X-Goog-FieldMask":
               "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType",
           },
@@ -94,9 +110,7 @@ async function fetchRouteTextSearchPredictions({
 
       const data = await response.json();
 
-      return (data.places ?? [])
-        .map(normalizeTextSearchPlace)
-        .filter(Boolean);
+      return (data.places ?? []).map(normalizeTextSearchPlace).filter(Boolean);
     }),
   );
 
@@ -219,10 +233,7 @@ export default function AutocompleteInput({
         `input=${encodeURIComponent(inputText)}` + // Takes user input & makes it safe for URL (e.g. spaces become %20)
         `&components=country:ca`; // Restrict results to Canadian locations
 
-      if (
-        typeof autocompleteTypes === "string" &&
-        autocompleteTypes.trim()
-      ) {
+      if (typeof autocompleteTypes === "string" && autocompleteTypes.trim()) {
         url += `&types=${encodeURIComponent(autocompleteTypes.trim())}`;
       }
 
@@ -238,7 +249,11 @@ export default function AutocompleteInput({
 
       url += `&key=${apiKey}`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: {
+          ...getAndroidRestrictionHeaders(),
+        },
+      });
       const data = await res.json();
 
       if (latestPredictionRequestId.current !== requestId) {
@@ -310,7 +325,11 @@ export default function AutocompleteInput({
         `&fields=formatted_address,geometry` +
         `&key=${apiKey}`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: {
+          ...getAndroidRestrictionHeaders(),
+        },
+      });
       const data = await res.json();
 
       // Extract and format the location data

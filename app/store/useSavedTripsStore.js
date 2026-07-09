@@ -72,6 +72,8 @@ export const useSavedTripsStore = create((set) => ({
 
       set((state) => ({
         savedTrips: state.savedTrips.filter((trip) => trip.id !== tripId),
+        activeSavedTrip:
+          state.activeSavedTrip?.id === tripId ? null : state.activeSavedTrip,
       }));
       return true;
     } catch (error) {
@@ -93,7 +95,13 @@ export const useSavedTripsStore = create((set) => ({
       }
 
       const savedTrips = await loadSavedTrips();
-      set({ savedTrips });
+      set((state) => ({
+        savedTrips,
+        activeSavedTrip:
+          state.activeSavedTrip?.id === updatedTrip.id
+            ? updatedTrip
+            : state.activeSavedTrip,
+      }));
       return updatedTrip;
     } catch (error) {
       logger.warn("[useSavedTripsStore] updateTrip error:", error);
@@ -113,7 +121,7 @@ export const useSavedTripsStore = create((set) => ({
         return false;
       }
 
-      set({ savedTrips: [] });
+      set({ savedTrips: [], activeSavedTrip: null });
       return true;
     } catch (error) {
       logger.warn("[useSavedTripsStore] clearTrips error:", error);

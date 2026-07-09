@@ -1,5 +1,19 @@
 const GOOGLE_PLACES_BASE_URL = "https://places.googleapis.com/v1";
 
+function getAndroidRestrictionHeaders() {
+  const androidPackageName = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
+  const androidCertSha1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
+
+  if (!androidPackageName || !androidCertSha1) {
+    return {};
+  }
+
+  return {
+    "X-Android-Package": androidPackageName,
+    "X-Android-Cert": androidCertSha1,
+  };
+}
+
 function getGoogleApiKey() {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -55,6 +69,7 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
+      ...getAndroidRestrictionHeaders(),
       "X-Goog-FieldMask":
         "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
     },
