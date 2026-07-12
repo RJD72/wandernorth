@@ -145,6 +145,9 @@ const Route = () => {
 
   const router = useRouter();
   const { returnTo, savedTripId, mode } = useLocalSearchParams();
+  const normalizedSavedTripId = Array.isArray(savedTripId)
+    ? savedTripId[0]
+    : savedTripId;
   const { activeRouteRequest } = useRoutePlannerStore();
   const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
   const {
@@ -153,12 +156,12 @@ const Route = () => {
     savedTripsError,
     clearSavedTripsError,
     activeSavedTrip,
+    loadTripById,
   } = useSavedTripsStore();
   const requestedSavedTripMode = mode === "savedTrip";
   const isSavedTripMode = Boolean(
     requestedSavedTripMode &&
-      activeSavedTrip &&
-      activeSavedTrip.id === savedTripId,
+      activeSavedTrip?.id === normalizedSavedTripId,
   );
   const isLegacySavedTransitTrip = Boolean(
     isSavedTripMode && activeSavedTrip?.routeRequest?.travelMode === "transit",
@@ -434,12 +437,25 @@ const Route = () => {
         clearSaveTripStatus();
 
         if (requestedSavedTripMode) {
-          const savedRouteRequest = activeSavedTrip?.routeRequest;
-          const savedRoute = activeSavedTrip?.route;
+          const savedTrip =
+            activeSavedTrip?.id === normalizedSavedTripId
+              ? activeSavedTrip
+              : await loadTripById(normalizedSavedTripId);
+
+          if (!isCurrent) return;
+
+          if (!savedTrip) {
+            setError(
+              "This saved trip could not be found or loaded. Return to Saved Trips and try again.",
+            );
+            return;
+          }
+
+          const savedRouteRequest = savedTrip.routeRequest;
+          const savedRoute = savedTrip.route;
           const savedEncodedPolyline = savedRoute?.encodedPolyline;
 
           if (
-            !isSavedTripMode ||
             !savedRouteRequest ||
             typeof savedEncodedPolyline !== "string" ||
             !savedEncodedPolyline.trim()
@@ -464,10 +480,8 @@ const Route = () => {
             return;
           }
 
-          const savedSelectedStops = Array.isArray(
-            activeSavedTrip.selectedStops,
-          )
-            ? activeSavedTrip.selectedStops
+          const savedSelectedStops = Array.isArray(savedTrip.selectedStops)
+            ? savedTrip.selectedStops
             : [];
 
           setRouteData({
@@ -541,7 +555,14 @@ const Route = () => {
     return () => {
       isCurrent = false;
     };
-  }, [activeSavedTrip, isSavedTripMode, requestedSavedTripMode, routeRequest]);
+  }, [
+    activeSavedTrip,
+    isSavedTripMode,
+    loadTripById,
+    normalizedSavedTripId,
+    requestedSavedTripMode,
+    routeRequest,
+  ]);
 
   // Effect 2: Load POIs whenever a route is available.
   // Current implementation is a placeholder so the screen structure is ready
@@ -883,7 +904,13 @@ const Route = () => {
   if (error) {
     return (
       <View className="flex-1 items-center justify-center bg-stone-50 px-6">
-        <Text className="text-lg text-red-600">{error}</Text>
+        <Text className="mb-4 text-center text-lg text-red-600">{error}</Text>
+        {requestedSavedTripMode && (
+          <WNButton
+            label="Back to Saved Trips"
+            onPress={() => router.replace("/(tabs)/saved-trips")}
+          />
+        )}
       </View>
     );
   }
@@ -918,8 +945,8 @@ const Route = () => {
         {isLegacySavedTransitTrip && (
           <View className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
             <Text className="font-semibold text-amber-950">
-              This saved trip uses Transit, which is no longer available for
-              new route planning. You can still view the saved route.
+              This saved trip uses Transit, which is no longer available for new
+              route planning. You can still view the saved route.
             </Text>
           </View>
         )}

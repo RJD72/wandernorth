@@ -4,15 +4,32 @@ import {
   clearSavedTrips,
   deleteSavedTrip,
   loadSavedTrips,
+  loadSavedTripById,
   saveTrip,
   updateSavedTrip,
 } from "../services/savedTripsService";
 import { logger } from "../utils/logger";
 
+function getSavedTripsMessage(error, fallback) {
+  if (
+    error?.code === "corrupt-storage" ||
+    error?.code === "unsupported-storage"
+  )
+    return "Saved Trips data on this device is corrupted. Reset Saved Trips to recover.";
+  if (error?.code === "trip-not-found")
+    return "This saved trip could not be found on this device.";
+  if (error?.code === "invalid-title")
+    return "Enter a title for this saved trip.";
+  if (error?.code === "invalid-trip-payload")
+    return "This trip is incomplete and could not be saved.";
+  return fallback;
+}
+
 export const useSavedTripsStore = create((set) => ({
   savedTrips: [],
   loadingSavedTrips: false,
   savedTripsError: null,
+  savedTripsRecoveryRequired: false,
   activeSavedTrip: null,
 
   setActiveSavedTrip: (activeSavedTrip) => set({ activeSavedTrip }),
@@ -27,14 +44,47 @@ export const useSavedTripsStore = create((set) => ({
 
     try {
       const savedTrips = await loadSavedTrips();
-      set({ savedTrips });
+      set({ savedTrips, savedTripsRecoveryRequired: false });
       return savedTrips;
     } catch (error) {
       logger.warn("[useSavedTripsStore] loadTrips error:", error);
-      set({ savedTripsError: "Unable to load saved trips." });
+      set({
+        savedTrips: [],
+        savedTripsError: getSavedTripsMessage(
+          error,
+          "Unable to load saved trips.",
+        ),
+        savedTripsRecoveryRequired: [
+          "corrupt-storage",
+          "unsupported-storage",
+        ].includes(error?.code),
+      });
       return [];
     } finally {
       set({ loadingSavedTrips: false });
+    }
+  },
+
+  loadTripById: async (tripId) => {
+    set({ savedTripsError: null });
+    try {
+      const trip = await loadSavedTripById(tripId);
+      set((state) => ({
+        activeSavedTrip: trip,
+        savedTrips: state.savedTrips.some((item) => item.id === trip.id)
+          ? state.savedTrips.map((item) => (item.id === trip.id ? trip : item))
+          : state.savedTrips,
+      }));
+      return trip;
+    } catch (error) {
+      logger.warn("[useSavedTripsStore] loadTripById error code:", error?.code);
+      set({
+        savedTripsError: getSavedTripsMessage(
+          error,
+          "Unable to reopen saved trip.",
+        ),
+      });
+      return null;
     }
   },
 
@@ -50,11 +100,19 @@ export const useSavedTripsStore = create((set) => ({
       }
 
       const savedTrips = await loadSavedTrips();
-      set({ savedTrips });
+      set((state) => ({
+        savedTrips,
+        activeSavedTrip:
+          state.activeSavedTrip?.id === savedTrip.id
+            ? savedTrip
+            : state.activeSavedTrip,
+      }));
       return savedTrip;
     } catch (error) {
       logger.warn("[useSavedTripsStore] addTrip error:", error);
-      set({ savedTripsError: "Unable to save trip." });
+      set({
+        savedTripsError: getSavedTripsMessage(error, "Unable to save trip."),
+      });
       return null;
     }
   },
@@ -78,7 +136,12 @@ export const useSavedTripsStore = create((set) => ({
       return true;
     } catch (error) {
       logger.warn("[useSavedTripsStore] removeTrip error:", error);
-      set({ savedTripsError: "Unable to delete saved trip." });
+      set({
+        savedTripsError: getSavedTripsMessage(
+          error,
+          "Unable to delete saved trip.",
+        ),
+      });
       return false;
     }
   },
@@ -105,7 +168,12 @@ export const useSavedTripsStore = create((set) => ({
       return updatedTrip;
     } catch (error) {
       logger.warn("[useSavedTripsStore] updateTrip error:", error);
-      set({ savedTripsError: "Unable to update saved trip." });
+      set({
+        savedTripsError: getSavedTripsMessage(
+          error,
+          "Unable to update saved trip.",
+        ),
+      });
       return null;
     }
   },
@@ -121,7 +189,11 @@ export const useSavedTripsStore = create((set) => ({
         return false;
       }
 
-      set({ savedTrips: [], activeSavedTrip: null });
+      set({
+        savedTrips: [],
+        activeSavedTrip: null,
+        savedTripsRecoveryRequired: false,
+      });
       return true;
     } catch (error) {
       logger.warn("[useSavedTripsStore] clearTrips error:", error);

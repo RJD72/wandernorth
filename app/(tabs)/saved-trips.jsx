@@ -156,6 +156,7 @@ export default function SavedTrips() {
     savedTrips,
     loadingSavedTrips,
     savedTripsError,
+    savedTripsRecoveryRequired,
     loadTrips,
     removeTrip,
     clearTrips,
@@ -206,6 +207,21 @@ export default function SavedTrips() {
         },
         {
           text: "Clear All",
+          style: "destructive",
+          onPress: () => clearTrips(),
+        },
+      ],
+    );
+  }
+
+  function confirmResetCorruptedTrips() {
+    Alert.alert(
+      "Reset Saved Trips?",
+      "This removes all saved trips stored on this device. Use this only to recover from corrupted Saved Trips data.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset Saved Trips",
           style: "destructive",
           onPress: () => clearTrips(),
         },
@@ -312,20 +328,18 @@ export default function SavedTrips() {
             Finished routes saved locally on this device.
           </Text>
 
-          {!loadingSavedTrips &&
-            !savedTripsError &&
-            savedTrips.length > 0 && (
-              <Pressable
-                onPress={confirmClearAllTrips}
-                accessibilityRole="button"
-                accessibilityLabel="Clear all saved trips"
-                className="mt-5 self-start rounded-full border border-red-300 bg-red-100 px-3 py-1"
-              >
-                <Text className="font-semibold text-red-700">
-                  Clear All Saved Trips
-                </Text>
-              </Pressable>
-            )}
+          {!loadingSavedTrips && !savedTripsError && savedTrips.length > 0 && (
+            <Pressable
+              onPress={confirmClearAllTrips}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all saved trips"
+              className="mt-5 self-start rounded-full border border-red-300 bg-red-100 px-3 py-1"
+            >
+              <Text className="font-semibold text-red-700">
+                Clear All Saved Trips
+              </Text>
+            </Pressable>
+          )}
 
           {loadingSavedTrips && (
             <View className="mt-6 rounded-2xl bg-white p-4">
@@ -338,6 +352,16 @@ export default function SavedTrips() {
           {!loadingSavedTrips && savedTripsError && (
             <View className="mt-6 rounded-2xl bg-red-50 p-4">
               <Text className="text-sm text-red-700">{savedTripsError}</Text>
+              {savedTripsRecoveryRequired && (
+                <Pressable
+                  onPress={confirmResetCorruptedTrips}
+                  className="mt-4 self-start rounded-lg bg-red-700 px-4 py-3"
+                >
+                  <Text className="font-semibold text-white">
+                    Reset Saved Trips
+                  </Text>
+                </Pressable>
+              )}
             </View>
           )}
 
@@ -355,21 +379,19 @@ export default function SavedTrips() {
               </View>
             )}
 
-          {!loadingSavedTrips &&
-            !savedTripsError &&
-            savedTrips.length > 0 && (
-              <View className="mt-6">
-                {savedTrips.map((trip) => (
-                  <SavedTripCard
-                    key={trip.id}
-                    trip={trip}
-                    onOpen={() => handleOpenSavedTrip(trip)}
-                    onDelete={() => confirmDeleteTrip(trip)}
-                    onRename={() => openRenameTripModal(trip)}
-                  />
-                ))}
-              </View>
-            )}
+          {!loadingSavedTrips && !savedTripsError && savedTrips.length > 0 && (
+            <View className="mt-6">
+              {savedTrips.map((trip) => (
+                <SavedTripCard
+                  key={trip.id}
+                  trip={trip}
+                  onOpen={() => handleOpenSavedTrip(trip)}
+                  onDelete={() => confirmDeleteTrip(trip)}
+                  onRename={() => openRenameTripModal(trip)}
+                />
+              ))}
+            </View>
+          )}
 
           <PremiumStatusDevCard />
         </View>
