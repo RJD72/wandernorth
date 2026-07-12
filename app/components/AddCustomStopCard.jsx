@@ -12,7 +12,16 @@ export default function AddCustomStopCard({
 }) {
   const [customStopAddress, setCustomStopAddress] = useState("");
   const [customStopCoords, setCustomStopCoords] = useState(null);
+  const [customStopMetadata, setCustomStopMetadata] = useState(null);
   const [error, setError] = useState(null);
+
+  function getNameAndAddressFromDescription(description) {
+    const [name, address] = String(description || "")
+      .split(/\s+\u00B7\s+|\s+\u00C2\u00B7\s+/)
+      .map((part) => part.trim());
+
+    return { name, address };
+  }
 
   function handleAddCustomStop() {
     if (!customStopAddress.trim()) {
@@ -26,19 +35,35 @@ export default function AddCustomStopCard({
     }
 
     const trimmedAddress = customStopAddress.trim();
+    const parsedDescription = getNameAndAddressFromDescription(
+      customStopMetadata?.prediction?.description,
+    );
+    const placeName =
+      customStopMetadata?.name?.trim() ||
+      customStopMetadata?.title?.trim() ||
+      parsedDescription.name ||
+      trimmedAddress;
+    const formattedAddress =
+      customStopMetadata?.address?.trim() ||
+      parsedDescription.address ||
+      trimmedAddress;
 
     onAddStop({
       id: `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: trimmedAddress,
+      name: placeName,
+      title: placeName,
       category: "Custom Stop",
-      address: trimmedAddress,
+      address: formattedAddress,
       latitude: customStopCoords.latitude,
       longitude: customStopCoords.longitude,
       source: "custom",
+      placeId: customStopMetadata?.placeId,
+      googlePlaceId: customStopMetadata?.placeId,
     });
 
     setCustomStopAddress("");
     setCustomStopCoords(null);
+    setCustomStopMetadata(null);
     setError(null);
   }
 
@@ -68,11 +93,13 @@ export default function AddCustomStopCard({
           onChangeText={(text) => {
             setCustomStopAddress(text);
             setCustomStopCoords(null);
+            setCustomStopMetadata(null);
             setError(null);
           }}
-          onSelectLocation={(address, coords) => {
+          onSelectLocation={(address, coords, metadata) => {
             setCustomStopAddress(address);
             setCustomStopCoords(coords);
+            setCustomStopMetadata(metadata || null);
             setError(null);
           }}
         />

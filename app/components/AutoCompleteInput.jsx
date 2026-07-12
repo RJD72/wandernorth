@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import WNInput from "./WNInput";
 import { logger } from "../utils/logger";
-import { get } from "react-native/Libraries/TurboModule/TurboModuleRegistry";
 
 const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
 const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
@@ -40,12 +39,16 @@ function isValidSearchPoint(point) {
 
 function normalizeTextSearchPlace(place) {
   const title = place?.displayName?.text;
+  const address = place?.formattedAddress || "";
 
   if (!place?.id || !title) return null;
 
   return {
     place_id: place.id,
-    description: place.formattedAddress
+    title,
+    name: title,
+    address,
+    description: address
       ? `${title} · ${place.formattedAddress}`
       : title,
     source: "text-search",
@@ -63,6 +66,16 @@ function mergePredictions(...predictionGroups) {
     seenPlaceIds.add(prediction.place_id);
     return true;
   });
+}
+
+function getPredictionName(prediction) {
+  return (
+    prediction?.structured_formatting?.main_text ||
+    prediction?.name ||
+    prediction?.title ||
+    prediction?.description ||
+    ""
+  );
 }
 
 async function fetchRouteTextSearchPredictions({
@@ -317,12 +330,12 @@ export default function AutocompleteInput({
    * @param {string} placeId - The Google Place ID from the prediction
    * @returns {Object|null} Object with address and coordinates, or null on error
    */
-  const fetchPlaceDetails = async (placeId) => {
+  const fetchPlaceDetails = async (placeId, fallbackName = "") => {
     try {
       const url =
         `https://maps.googleapis.com/maps/api/place/details/json?` +
         `place_id=${placeId}` +
-        `&fields=formatted_address,geometry` +
+        `&fields=name,formatted_address,geometry` +
         `&key=${apiKey}`;
 
       const res = await fetch(url, {
@@ -336,6 +349,7 @@ export default function AutocompleteInput({
       if (data.status === "OK") {
         // Return formatted address and coordinates in a consistent format for parent component
         return {
+          name: data.result.name || fallbackName,
           address: data.result.formatted_address,
           coords: {
             latitude: data.result.geometry.location.lat,
@@ -379,13 +393,22 @@ export default function AutocompleteInput({
     onChangeText(prediction.description);
 
     // Fetch full place details to get coordinates
-    const details = await fetchPlaceDetails(prediction.place_id);
+    const predictionName = getPredictionName(prediction);
+    const details = await fetchPlaceDetails(
+      prediction.place_id,
+      predictionName,
+    );
 
     // Update with formatted address and notify parent via callback
     if (details) {
       setInput(details.address);
       onChangeText(details.address);
-      onSelectLocation(details.address, details.coords);
+      onSelectLocation(details.address, details.coords, {
+        name: details.name,
+        address: details.address,
+        placeId: prediction.place_id,
+        prediction,
+      });
     }
   };
 

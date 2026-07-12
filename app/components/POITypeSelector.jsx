@@ -8,77 +8,67 @@ import {
   ScrollView,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import {
+  POI_CATEGORY_GROUPS,
+  getPoiCategoryLabelById,
+} from "../config/poiCategories";
 
-/**
- * Static list of all supported Point of Interest types.
- *
- * id:
- * The value your app stores and passes into the route/POI logic.
- *
- * label:
- * The user-friendly label shown in the UI.
- *
- * icon:
- * The MaterialCommunityIcons icon name shown beside each option.
- */
-const POI_TYPES = [
-  { id: "restaurant", label: "Restaurant", icon: "silverware-fork-knife" },
-  { id: "cafe", label: "Cafe", icon: "coffee" },
-  { id: "bar", label: "Bar", icon: "glass-cocktail" },
-  { id: "hotel", label: "Hotel", icon: "bed" },
-  { id: "park", label: "Park", icon: "tree" },
-  { id: "museum", label: "Museum", icon: "bank" },
-  { id: "tourist_attraction", label: "Tourist Attraction", icon: "map-marker" },
-  { id: "gas_station", label: "Gas Station", icon: "gas-station" },
-];
+const POI_TYPE_ICONS = {
+  restaurant: "silverware-fork-knife",
+  breakfast: "food-croissant",
+  fast_food: "hamburger",
+  pizza: "pizza",
+  italian: "silverware-fork-knife",
+  chinese: "silverware-fork-knife",
+  sushi: "silverware-fork-knife",
+  mexican: "silverware-fork-knife",
+  thai: "silverware-fork-knife",
+  indian: "silverware-fork-knife",
+  seafood: "fish",
+  steakhouse: "silverware-fork-knife",
+  vegan_vegetarian: "leaf",
+  cafe: "coffee",
+  coffee: "coffee-outline",
+  bakery: "bread-slice",
+  donuts: "circle-slice-8",
+  ice_cream: "ice-cream",
+  park: "tree",
+  beach: "beach",
+  hiking: "hiking",
+  scenic: "image-filter-hdr",
+  campground: "tent",
+  tourist_attraction: "map-marker",
+  museum: "bank",
+  historic: "home-city-outline",
+  winery: "glass-wine",
+  zoo: "paw",
+  amusement: "ferris-wheel",
+  gas_station: "gas-station",
+  ev_charging: "ev-station",
+  grocery: "cart",
+  rest_stop: "parking",
+  parking: "parking",
+};
 
-/**
- * POITypeSelector
- *
- * A controlled multi-select bottom-sheet component used to choose which
- * types of POIs the user wants along their route.
- *
- * This component does NOT own the selected POI state permanently.
- * The parent screen owns selectedPoiTypes and passes it in as a prop.
- *
- * Props:
- *   selectedPoiTypes {string[]}
- *     Array of currently selected POI type ids.
- *     Example: ["restaurant", "park", "scenic"]
- *
- *   onChange {(nextSelectedTypes: string[]) => void}
- *     Called whenever the selected POI list changes.
- *
- *   label {string}
- *     Optional label shown above the dropdown trigger.
- */
+function getPoiTypeIcon(categoryId) {
+  return POI_TYPE_ICONS[categoryId] || "map-marker-outline";
+}
+
 export default function POITypeSelector({
   selectedPoiTypes = [],
   onChange,
   label = "What do you want to see?",
 }) {
-  // Controls whether the selection bottom sheet is currently visible.
   const [isOpen, setIsOpen] = useState(false);
 
-  /**
-   * Builds the short summary shown inside the closed dropdown field.
-   *
-   * Examples:
-   *   No types selected         -> "Any type of stop"
-   *   1 selected                -> "Restaurant"
-   *   3 selected                -> "Restaurant, Park, Scenic"
-   *   More than 3 selected      -> "Restaurant, Park, Scenic +2"
-   */
   const selectedSummary = useMemo(() => {
     if (selectedPoiTypes.length === 0) {
       return "Any type of stop";
     }
 
-    // Map selected ids to their labels using the POI_TYPES array.
-    const selectedLabels = POI_TYPES.filter((poiType) =>
-      selectedPoiTypes.includes(poiType.id),
-    ).map((poiType) => poiType.label);
-
+    const selectedLabels = selectedPoiTypes
+      .map(getPoiCategoryLabelById)
+      .filter(Boolean);
     const visibleLabels = selectedLabels.slice(0, 3);
     const hiddenCount = selectedLabels.length - visibleLabels.length;
 
@@ -89,60 +79,38 @@ export default function POITypeSelector({
     return visibleLabels.join(", ");
   }, [selectedPoiTypes]);
 
-  /**
-   * Adds or removes a POI type from the selectedPoiTypes array.
-   *
-   * Important:
-   * We do not mutate selectedPoiTypes directly.
-   * We create a new array and pass it back to the parent through onChange.
-   */
   function handleTogglePoiType(id) {
-    // Check whether the tapped type is already in the active selection.
     const isAlreadySelected = selectedPoiTypes.includes(id);
 
     if (isAlreadySelected) {
-      // Build a new array without the deselected id and notify the parent.
-      const nextSelectedTypes = selectedPoiTypes.filter(
-        (selectedId) => selectedId !== id,
+      onChange(
+        selectedPoiTypes.filter((selectedId) => selectedId !== id),
       );
-
-      onChange(nextSelectedTypes);
       return;
     }
 
-    // Build a new array with the newly selected id appended and notify the parent.
-    const nextSelectedTypes = [...selectedPoiTypes, id];
-
-    onChange(nextSelectedTypes);
+    onChange([...selectedPoiTypes, id]);
   }
 
-  /**
-   * Clears all selected POI types.
-   * This means the route engine can treat the search as "any POI type".
-   */
   function handleClearAll() {
     onChange([]);
   }
 
   return (
     <View className="w-full">
-      {/* Field label */}
       <Text className="mb-2 text-sm font-semibold text-white">{label}</Text>
 
-      {/* Closed dropdown trigger — tapping opens the bottom-sheet modal */}
       <Pressable
         onPress={() => setIsOpen(true)}
-        accessibilityRole="button" // Screen readers announce this as a button
-        accessibilityState={{ expanded: isOpen }} // Communicates open/closed state to assistive tech
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isOpen }}
         className="flex-row items-center justify-between rounded-2xl border border-emerald-200 bg-white px-4 py-4"
       >
         <View className="mr-3 flex-1">
-          {/* Primary line: compact summary of selected types (computed by selectedSummary memo) */}
           <Text className="text-base font-medium text-emerald-950">
             {selectedSummary}
           </Text>
 
-          {/* Secondary line: contextual hint — either a generic prompt or a count badge */}
           <Text className="mt-1 text-xs text-stone-500">
             {selectedPoiTypes.length === 0
               ? "Search all available stop types"
@@ -150,29 +118,20 @@ export default function POITypeSelector({
           </Text>
         </View>
 
-        {/* Chevron indicates this is an expandable control */}
         <MaterialCommunityIcons name="chevron-down" size={22} color="#1D3B2A" />
       </Pressable>
 
-      {/* Bottom-sheet modal — rendered as a transparent full-screen overlay */}
       <Modal
         visible={isOpen}
-        transparent // Keeps the background content partially visible
-        animationType="fade" // Smoothly fades the overlay in/out
-        onRequestClose={() => setIsOpen(false)} // Handles Android hardware back-button press
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsOpen(false)}
       >
-        {/* Full-screen pressable overlay — tapping outside the sheet dismisses it */}
         <Pressable
           onPress={() => setIsOpen(false)}
           className="flex-1 justify-end bg-black/40"
         >
-          {/*
-           * Bottom sheet container — the nested Pressable stops touch events from
-           * bubbling up to the overlay, so tapping inside the sheet doesn't close it.
-           * max-h-[80%] prevents the sheet from covering the entire screen on short lists.
-           */}
           <Pressable className="max-h-[80%] rounded-t-3xl bg-white px-5 pb-8 pt-5">
-            {/* Header */}
             <View className="mb-4 flex-row items-center justify-between">
               <View className="mr-4 flex-1">
                 <Text className="text-lg font-bold text-emerald-950">
@@ -193,16 +152,13 @@ export default function POITypeSelector({
               </TouchableOpacity>
             </View>
 
-            {/* Action row — shows live selection count and a conditional "Clear all" shortcut */}
             <View className="mb-4 flex-row items-center justify-between">
-              {/* Live count label updates as the user toggles options */}
               <Text className="text-sm font-medium text-stone-600">
                 {selectedPoiTypes.length === 0
                   ? "No filters selected"
                   : `${selectedPoiTypes.length} selected`}
               </Text>
 
-              {/* "Clear all" is only rendered when at least one type is selected */}
               {selectedPoiTypes.length > 0 && (
                 <Pressable onPress={handleClearAll}>
                   <Text className="text-sm font-semibold text-emerald-800">
@@ -212,82 +168,68 @@ export default function POITypeSelector({
               )}
             </View>
 
-            {/*
-             * Scrollable options list — iterates over the static POI_TYPES array.
-             * showsVerticalScrollIndicator is hidden to keep the UI clean;
-             * the max-h on the parent sheet ensures the list remains scrollable.
-             */}
             <ScrollView showsVerticalScrollIndicator={false}>
-              {POI_TYPES.map((poiType) => {
-                // Determine whether this option is part of the active selection.
-                const isSelected = selectedPoiTypes.includes(poiType.id);
+              {POI_CATEGORY_GROUPS.map((group) => (
+                <View key={group.id} className="mb-4">
+                  <Text className="mb-2 text-xs font-bold uppercase text-stone-500">
+                    {group.label}
+                  </Text>
 
-                return (
-                  <Pressable
-                    key={poiType.id}
-                    onPress={() => handleTogglePoiType(poiType.id)}
-                    // Highlight the row with a forest tint when selected; neutral otherwise.
-                    className={`mb-2 flex-row items-center justify-between rounded-2xl px-4 py-4 ${
-                      isSelected ? "bg-emerald-100" : "bg-stone-50"
-                    }`}
-                  >
-                    <View className="flex-row items-center">
-                      {/*
-                       * Icon badge — filled dark when selected, white background when not.
-                       * The icon colour inverts to maintain contrast in both states.
-                       */}
-                      <View
-                        className={`mr-3 h-10 w-10 items-center justify-center rounded-full ${
-                          isSelected ? "bg-emerald-800" : "bg-white"
+                  {group.categories.map((poiType) => {
+                    const isSelected = selectedPoiTypes.includes(poiType.id);
+
+                    return (
+                      <Pressable
+                        key={poiType.id}
+                        onPress={() => handleTogglePoiType(poiType.id)}
+                        className={`mb-2 flex-row items-center justify-between rounded-2xl px-4 py-4 ${
+                          isSelected ? "bg-emerald-100" : "bg-stone-50"
                         }`}
                       >
-                        <MaterialCommunityIcons
-                          name={poiType.icon}
-                          size={20}
-                          color={isSelected ? "white" : "#1D3B2A"}
-                        />
-                      </View>
+                        <View className="flex-row items-center">
+                          <View
+                            className={`mr-3 h-10 w-10 items-center justify-center rounded-full ${
+                              isSelected ? "bg-emerald-800" : "bg-white"
+                            }`}
+                          >
+                            <MaterialCommunityIcons
+                              name={getPoiTypeIcon(poiType.id)}
+                              size={20}
+                              color={isSelected ? "white" : "#1D3B2A"}
+                            />
+                          </View>
 
-                      {/* Option label — bold and forest-coloured when selected */}
-                      <Text
-                        className={`text-base ${
-                          isSelected
-                            ? "font-bold text-emerald-950"
-                            : "font-medium text-stone-700"
-                        }`}
-                      >
-                        {poiType.label}
-                      </Text>
-                    </View>
+                          <Text
+                            className={`text-base ${
+                              isSelected
+                                ? "font-bold text-emerald-950"
+                                : "font-medium text-stone-700"
+                            }`}
+                          >
+                            {poiType.label}
+                          </Text>
+                        </View>
 
-                    {/*
-                     * Right-hand selection indicator:
-                     *   Selected   → filled check-circle in forest colour
-                     *   Unselected → outline circle in muted stone colour
-                     */}
-                    {isSelected ? (
-                      <MaterialCommunityIcons
-                        name="check-circle"
-                        size={22}
-                        color="#1D3B2A"
-                      />
-                    ) : (
-                      <MaterialCommunityIcons
-                        name="checkbox-blank-circle-outline"
-                        size={22}
-                        color="#A8A29E"
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
+                        {isSelected ? (
+                          <MaterialCommunityIcons
+                            name="check-circle"
+                            size={22}
+                            color="#1D3B2A"
+                          />
+                        ) : (
+                          <MaterialCommunityIcons
+                            name="checkbox-blank-circle-outline"
+                            size={22}
+                            color="#A8A29E"
+                          />
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
             </ScrollView>
 
-            {/*
-             * Done button — closes the sheet and confirms the current selection.
-             * No additional state update is needed here because onChange is called
-             * immediately on each toggle, keeping the parent state always in sync.
-             */}
             <Pressable
               onPress={() => setIsOpen(false)}
               className="mt-4 rounded-2xl bg-emerald-800 px-4 py-4"

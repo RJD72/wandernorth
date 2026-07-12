@@ -1,5 +1,6 @@
 import { View, Text } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { getPoiCategoryLabelById } from "../config/poiCategories";
 
 export default function RouteSummaryCard({
   startingAddress,
@@ -13,7 +14,7 @@ export default function RouteSummaryCard({
 }) {
   const formattedPoiTypes =
     selectedPoiTypes.length > 0
-      ? selectedPoiTypes.join(", ")
+      ? selectedPoiTypes.map(getPoiCategoryLabelById).join(", ")
       : "No preferences selected";
 
   return (
@@ -92,7 +93,7 @@ export default function RouteSummaryCard({
           Selected stops: {selectedStopCount}
         </Text>
 
-        <Text className="mt-1 capitalize text-stone-900">
+        <Text className="mt-1 text-stone-900">
           POI Types: {formattedPoiTypes}
         </Text>
       </View>

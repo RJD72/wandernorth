@@ -21,10 +21,7 @@ import PremiumFeatureCard from "../components/PremiumFeatureCard";
 import CollapsibleSection from "../components/CollapsibleSection";
 
 import { buildGoogleRoute } from "../services/googleRoutes";
-import {
-  fetchPoisNearRoutePoints,
-  normalizeSelectedPoiTypes,
-} from "../services/poiService";
+import { fetchPoisNearRoutePoints } from "../services/poiService";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -34,6 +31,10 @@ import {
   getFeatureLimits,
   getPremiumFeatureMessage,
 } from "../config/featureAccess";
+import {
+  getCanonicalPoiCategoryIds,
+  getPoiCategoryLabelById,
+} from "../config/poiCategories";
 
 import { getSamplePointsAlongRoute } from "../utils/routeSampling";
 import { attachRoutePositionToPois } from "../utils/routeDistance";
@@ -108,25 +109,9 @@ function buildGoogleMapsDirectionsUrl({
 }
 
 function formatCategoryTitle(category) {
-  const categoryLabels = {
-    restaurant: "Restaurants",
-    cafe: "Cafes",
-    bar: "Bars",
-    park: "Parks",
-    museum: "Museums",
-    lodging: "Hotels",
-    gas_station: "Gas Stations",
-    tourist_attraction: "Tourist Attractions",
-  };
-
   if (!category) return "Other Stops";
 
-  return (
-    categoryLabels[category] ??
-    String(category)
-      .replaceAll("_", " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-  );
+  return getPoiCategoryLabelById(category);
 }
 
 const Route = () => {
@@ -618,7 +603,7 @@ const Route = () => {
           numStops,
           {
             maxDistanceFromRouteMeters: MAX_DISTANCE_FROM_ROUTE_METERS,
-            preferredCategories: normalizeSelectedPoiTypes(selectedPoiTypes),
+            preferredCategories: getCanonicalPoiCategoryIds(selectedPoiTypes),
           },
         );
 

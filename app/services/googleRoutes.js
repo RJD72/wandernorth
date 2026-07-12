@@ -70,6 +70,7 @@ export async function buildGoogleRoute({
   destinationCoords,
   travelMode,
   waypoints = [], // Optional array of intermediate waypoints (not currently used)
+  suppressErrorLog = false,
 }) {
   // Google Routes API v2 endpoint — all requests are POST with a JSON body
   const url = `https://routes.googleapis.com/directions/v2:computeRoutes`;
@@ -153,7 +154,10 @@ export async function buildGoogleRoute({
   // Handle HTTP-level errors (4xx / 5xx). The API returns a structured error
   // object under data.error when this happens.
   if (!response.ok) {
-    logger.error("Google Routes API error", data);
+    if (!suppressErrorLog) {
+      logger.error("Google Routes API error", data);
+    }
+
     throw new Error(data?.error?.message || "Google route request failed");
   }
 
@@ -201,6 +205,7 @@ export async function canBuildGoogleRoute({
       destinationCoords,
       travelMode,
       waypoints,
+      suppressErrorLog: true,
     });
 
     return true;

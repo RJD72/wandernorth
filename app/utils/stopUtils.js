@@ -4,6 +4,18 @@ export function asText(value, fallback = "") {
   return fallback;
 }
 
+function splitCompositeDescription(description) {
+  const [title, address] = asText(description)
+    .split(/\s+\u00B7\s+|\s+\u00C2\u00B7\s+/)
+    .map((part) => part.trim());
+
+  if (!address) {
+    return { title: null, address: null };
+  }
+
+  return { title, address };
+}
+
 export function getStopId(stop) {
   if (!stop) return undefined;
 
@@ -24,11 +36,15 @@ export function getStopId(stop) {
 export function getStopTitle(stop) {
   if (!stop) return "Unnamed stop";
 
+  const descriptionParts = splitCompositeDescription(stop.description);
+
   return (
     asText(stop.name) ||
     asText(stop.title) ||
     asText(stop.displayName?.text) ||
     asText(stop.displayName) ||
+    descriptionParts.title ||
+    asText(stop.address) ||
     "Unnamed stop"
   );
 }
@@ -42,6 +58,8 @@ export function getStopCategory(stop) {
 export function getStopAddress(stop) {
   if (!stop) return "Address not available";
 
+  const descriptionParts = splitCompositeDescription(stop.description);
+
   return (
     stop.address ??
     stop.formattedAddress ??
@@ -49,6 +67,7 @@ export function getStopAddress(stop) {
     stop.vicinity ??
     stop.location?.address ??
     stop.properties?.address ??
+    descriptionParts.address ??
     "Address not available"
   );
 }

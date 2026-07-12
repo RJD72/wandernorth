@@ -16,10 +16,12 @@ import {
   activePoiProviders,
   primaryPoiProvider,
 } from "./poiProviders";
+import { getDistanceMeters } from "../utils/routeDistance";
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
 const MAX_ROUTE_POINTS_TO_SEARCH = 5;
 const MAX_POI_TYPES_TO_SEARCH = 2;
+const CROSS_PROVIDER_DUPLICATE_DISTANCE_METERS = 75;
 
 export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
   return primaryPoiProvider.normalizeSelectedPoiTypes(selectedPoiTypes);
@@ -55,6 +57,118 @@ function dedupePois(pois = []) {
     seen.add(key);
     return true;
   });
+}
+
+function normalizePoiName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function arePoiNamesVerySimilar(firstName, secondName) {
+  const normalizedFirstName = normalizePoiName(firstName);
+  const normalizedSecondName = normalizePoiName(secondName);
+
+  if (!normalizedFirstName || !normalizedSecondName) {
+    return false;
+  }
+
+  if (normalizedFirstName === normalizedSecondName) {
+    return true;
+  }
+
+  if (normalizedFirstName.length < 6 || normalizedSecondName.length < 6) {
+    return false;
+  }
+
+  return (
+    normalizedFirstName.includes(normalizedSecondName) ||
+    normalizedSecondName.includes(normalizedFirstName)
+  );
+}
+
+function arePoiCoordinatesClose(firstPoi, secondPoi) {
+  const distanceMeters = getDistanceMeters(
+    {
+      latitude: firstPoi?.latitude,
+      longitude: firstPoi?.longitude,
+    },
+    {
+      latitude: secondPoi?.latitude,
+      longitude: secondPoi?.longitude,
+    },
+  );
+
+  return (
+    Number.isFinite(distanceMeters) &&
+    distanceMeters <= CROSS_PROVIDER_DUPLICATE_DISTANCE_METERS
+  );
+}
+
+function isLikelySamePlaceAcrossProviders(firstPoi, secondPoi) {
+  if (!firstPoi || !secondPoi) {
+    return false;
+  }
+
+  if (firstPoi.provider === secondPoi.provider) {
+    return false;
+  }
+
+  return (
+    arePoiNamesVerySimilar(firstPoi.name, secondPoi.name) &&
+    arePoiCoordinatesClose(firstPoi, secondPoi)
+  );
+}
+
+function preferGooglePoi(firstPoi, secondPoi) {
+  if (firstPoi?.provider === "google") {
+    return firstPoi;
+  }
+
+  if (secondPoi?.provider === "google") {
+    return secondPoi;
+  }
+
+  return firstPoi;
+}
+
+function dedupeLikelySamePlacesAcrossProviders(pois = []) {
+  return pois.reduce((dedupedPois, poi) => {
+    const duplicateIndex = dedupedPois.findIndex((existingPoi) => {
+      return isLikelySamePlaceAcrossProviders(existingPoi, poi);
+    });
+
+    if (duplicateIndex === -1) {
+      dedupedPois.push(poi);
+      return dedupedPois;
+    }
+
+    dedupedPois[duplicateIndex] = preferGooglePoi(
+      dedupedPois[duplicateIndex],
+      poi,
+    );
+    return dedupedPois;
+  }, []);
+}
+
+function getProviderResultCounts(pois = []) {
+  const counts = pois.reduce((currentCounts, poi) => {
+    const provider = poi.provider || "unknown";
+
+    return {
+      ...currentCounts,
+      [provider]: (currentCounts[provider] || 0) + 1,
+    };
+  }, {});
+
+  return {
+    google: counts.google || 0,
+    tomtom: counts.tomtom || 0,
+    ...counts,
+  };
 }
 
 /**
@@ -151,10 +265,10 @@ export async function fetchPoisNearRoutePoints({
     const providerTypes = provider.getProviderPoiTypes(selectedPoiTypes);
 
     if (providerTypes.length === 0) {
-      logger.log(
-        "[poiService] No valid Google POI types found for:",
+      logger.log("[poiService] No valid POI types found for provider:", {
+        provider: provider.id,
         selectedPoiTypes,
-      );
+      });
       continue;
     }
 
@@ -168,16 +282,13 @@ export async function fetchPoisNearRoutePoints({
       MAX_POI_TYPES_TO_SEARCH,
     );
 
-    logger.log(
-      "[poiService] Incoming sampled route points:",
-      routePoints.length,
-    );
-    logger.log("[poiService] Points actually searched:", pointsToSearch.length);
-    logger.log("[poiService] Types actually searched:", typesToSearch);
-    logger.log(
-      "[poiService] Search request count:",
-      pointsToSearch.length * typesToSearch.length,
-    );
+    logger.log("[poiService] Provider search:", {
+      provider: provider.id,
+      incomingRoutePointCount: routePoints.length,
+      searchedRoutePointCount: pointsToSearch.length,
+      typesToSearch,
+      requestCount: pointsToSearch.length * typesToSearch.length,
+    });
 
     for (const point of pointsToSearch) {
       for (const providerType of typesToSearch) {
@@ -205,7 +316,17 @@ export async function fetchPoisNearRoutePoints({
     return [];
   });
 
-  const dedupedPois = dedupePois(allPois);
+  const providerIdDedupedPois = dedupePois(allPois);
+  const crossProviderDedupedPois = dedupeLikelySamePlacesAcrossProviders(
+    providerIdDedupedPois,
+  );
+
+  logger.log("[poiService] Provider result counts:", {
+    ...getProviderResultCounts(allPois),
+    totalBeforeDedupe: allPois.length,
+    totalAfterProviderIdDedupe: providerIdDedupedPois.length,
+    totalAfterCrossProviderDedupe: crossProviderDedupedPois.length,
+  });
 
   /**
    * Return the full candidate pool.
@@ -216,5 +337,5 @@ export async function fetchPoisNearRoutePoints({
    * poiService's job is to fetch possible stops.
    * poiScoring.js decides which stops are actually worth showing.
    */
-  return dedupedPois;
+  return crossProviderDedupedPois;
 }

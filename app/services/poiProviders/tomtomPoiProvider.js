@@ -1,52 +1,75 @@
 import { logger } from "../../utils/logger";
+import {
+  getCanonicalPoiCategoryId,
+  getPoiCategoryIdForTomTomQuery,
+  getTomTomQueriesForPoiCategoryIds,
+} from "../../config/poiCategories";
 
 const TOMTOM_POI_SEARCH_BASE_URL = "https://api.tomtom.com/search/2/poiSearch";
 
-const TOMTOM_POI_QUERY_MAP = {
-  cafe: "cafe",
-  coffee: "cafe",
-  coffee_shop: "cafe",
-
-  restaurant: "restaurant",
-  restaurants: "restaurant",
-  food: "restaurant",
-
-  bar: "bar",
-  bars: "bar",
-
-  attraction: "tourist attraction",
-  attractions: "tourist attraction",
-  tourist_attraction: "tourist attraction",
-
-  park: "park",
-  parks: "park",
-
-  museum: "museum",
-  museums: "museum",
-
-  lodging: "hotel",
-  hotel: "hotel",
-  hotels: "hotel",
-  motel: "motel",
-  motels: "motel",
-
-  gas: "gas station",
-  gas_station: "gas station",
-  gas_stations: "gas station",
-  "gas station": "gas station",
-  fuel: "gas station",
+const LEGACY_TOMTOM_POI_QUERY_MAP = {
+  bar: ["bar"],
+  bars: ["bar"],
+  lodging: ["hotel"],
+  hotel: ["hotel"],
+  hotels: ["hotel"],
+  motel: ["motel"],
+  motels: ["motel"],
 };
 
 const DEFAULT_TOMTOM_TYPES = ["cafe", "restaurant", "tourist attraction"];
+
+const RESTAURANT_TOMTOM_QUERIES = new Set([
+  "restaurant",
+  "breakfast",
+  "cafe",
+  "caf\u00e9",
+  "fast food",
+  "pizza",
+  "italian",
+  "chinese",
+  "sushi",
+  "mexican",
+  "thai",
+  "indian",
+  "seafood",
+  "steak house",
+  "vegetarian",
+  "organic",
+]);
+
+const WIDER_RADIUS_TOMTOM_QUERIES = new Set([
+  ...RESTAURANT_TOMTOM_QUERIES,
+  "coffee shop",
+  "food drinks: bakers",
+  "doughnuts",
+  "ice cream parlor",
+  "bar",
+  "hotel",
+  "motel",
+  "gas station",
+  "petrol station",
+]);
+
+function getTomTomQueriesForCategoryId(categoryId) {
+  const normalizedCategoryId = String(categoryId || "").trim().toLowerCase();
+  const configuredQueries = getTomTomQueriesForPoiCategoryIds([
+    normalizedCategoryId,
+  ]);
+
+  if (configuredQueries.length > 0) {
+    return configuredQueries;
+  }
+
+  return LEGACY_TOMTOM_POI_QUERY_MAP[normalizedCategoryId] || [];
+}
 
 export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
   if (!Array.isArray(selectedPoiTypes)) {
     return [];
   }
 
-  const mappedTypes = selectedPoiTypes
-    .map((type) => TOMTOM_POI_QUERY_MAP[String(type).trim().toLowerCase()])
-    .filter(Boolean);
+  const mappedTypes = selectedPoiTypes.flatMap(getTomTomQueriesForCategoryId);
 
   return [...new Set(mappedTypes)];
 }
@@ -66,8 +89,9 @@ export function prioritizeProviderPoiTypesForSearch(
   const explicitlySelectedRestaurant =
     Array.isArray(selectedPoiTypes) &&
     selectedPoiTypes.some((type) => {
-      const normalizedType = String(type).trim().toLowerCase();
-      return TOMTOM_POI_QUERY_MAP[normalizedType] === "restaurant";
+      return getTomTomQueriesForCategoryId(type).some((query) =>
+        RESTAURANT_TOMTOM_QUERIES.has(String(query).toLowerCase()),
+      );
     });
 
   if (!explicitlySelectedRestaurant) {
@@ -75,22 +99,19 @@ export function prioritizeProviderPoiTypesForSearch(
   }
 
   return [
-    "restaurant",
-    ...uniqueProviderTypes.filter((type) => type !== "restaurant"),
+    ...uniqueProviderTypes.filter((query) =>
+      RESTAURANT_TOMTOM_QUERIES.has(String(query).toLowerCase()),
+    ),
+    ...uniqueProviderTypes.filter(
+      (query) => !RESTAURANT_TOMTOM_QUERIES.has(String(query).toLowerCase()),
+    ),
   ];
 }
 
 export function getSearchRadiusForType(providerType) {
   const type = String(providerType || "").toLowerCase();
 
-  if (
-    type === "restaurant" ||
-    type === "cafe" ||
-    type === "bar" ||
-    type === "hotel" ||
-    type === "motel" ||
-    type === "gas station"
-  ) {
+  if (WIDER_RADIUS_TOMTOM_QUERIES.has(type)) {
     return 6000;
   }
 
@@ -116,6 +137,14 @@ function normalizeTomTomResult(result, fallbackCategory) {
     return null;
   }
 
+  const providerCategory =
+    fallbackCategory || result.poi?.categories?.[0] || null;
+  const appCategory =
+    getPoiCategoryIdForTomTomQuery(fallbackCategory) ||
+    getPoiCategoryIdForTomTomQuery(result.poi?.categories?.[0]) ||
+    getCanonicalPoiCategoryId(fallbackCategory) ||
+    "other";
+
   return {
     id: `tomtom:${providerPlaceId}`,
     provider: "tomtom",
@@ -123,7 +152,8 @@ function normalizeTomTomResult(result, fallbackCategory) {
     tomtomPlaceId: providerPlaceId,
 
     name: result.poi?.name || "Unnamed place",
-    category: fallbackCategory || result.poi?.categories?.[0] || "place",
+    category: appCategory,
+    providerCategory,
     address: result.address?.freeformAddress || "",
 
     latitude,

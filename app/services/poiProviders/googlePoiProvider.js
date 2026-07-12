@@ -1,48 +1,21 @@
 import { logger } from "../../utils/logger";
+import {
+  getCanonicalPoiCategoryId,
+  getGoogleTypesForPoiCategoryIds,
+  getPoiCategoryIdForGoogleType,
+} from "../../config/poiCategories";
 
 const GOOGLE_PLACES_NEARBY_URL =
   "https://places.googleapis.com/v1/places:searchNearby";
 
-/**
- * Map your app's POI type ids to Google Places API types.
- *
- * Important:
- * These values must be valid Google Places "includedTypes" values.
- * Keep this simple at first.
- */
-const GOOGLE_PLACE_TYPE_MAP = {
-  cafe: "cafe",
-  coffee: "cafe",
-  coffee_shop: "cafe",
-
-  restaurant: "restaurant",
-  restaurants: "restaurant",
-  food: "restaurant",
-
-  bar: "bar",
-  bars: "bar",
-
-  attraction: "tourist_attraction",
-  attractions: "tourist_attraction",
-  tourist_attraction: "tourist_attraction",
-
-  park: "park",
-  parks: "park",
-
-  museum: "museum",
-  museums: "museum",
-
-  lodging: "lodging",
-  hotel: "lodging",
-  hotels: "lodging",
-  motel: "lodging",
-  motels: "lodging",
-
-  gas: "gas_station",
-  gas_station: "gas_station",
-  gas_stations: "gas_station",
-  "gas station": "gas_station",
-  fuel: "gas_station",
+const LEGACY_GOOGLE_PLACE_TYPE_MAP = {
+  bar: ["bar"],
+  bars: ["bar"],
+  lodging: ["lodging"],
+  hotel: ["lodging"],
+  hotels: ["lodging"],
+  motel: ["lodging"],
+  motels: ["lodging"],
 };
 
 /**
@@ -51,6 +24,48 @@ const GOOGLE_PLACE_TYPE_MAP = {
  * Keep this conservative so you don't burn API calls or return chaos.
  */
 const DEFAULT_GOOGLE_TYPES = ["cafe", "restaurant", "tourist_attraction"];
+
+const RESTAURANT_GOOGLE_TYPES = new Set([
+  "restaurant",
+  "breakfast_restaurant",
+  "fast_food_restaurant",
+  "pizza_restaurant",
+  "italian_restaurant",
+  "chinese_restaurant",
+  "sushi_restaurant",
+  "mexican_restaurant",
+  "thai_restaurant",
+  "indian_restaurant",
+  "seafood_restaurant",
+  "steak_house",
+  "vegan_restaurant",
+  "vegetarian_restaurant",
+]);
+
+const WIDER_RADIUS_GOOGLE_TYPES = new Set([
+  ...RESTAURANT_GOOGLE_TYPES,
+  "cafe",
+  "coffee_shop",
+  "bakery",
+  "donut_shop",
+  "ice_cream_shop",
+  "bar",
+  "lodging",
+  "gas_station",
+]);
+
+function getGoogleTypesForCategoryId(categoryId) {
+  const normalizedCategoryId = String(categoryId || "").trim().toLowerCase();
+  const configuredTypes = getGoogleTypesForPoiCategoryIds([
+    normalizedCategoryId,
+  ]);
+
+  if (configuredTypes.length > 0) {
+    return configuredTypes;
+  }
+
+  return LEGACY_GOOGLE_PLACE_TYPE_MAP[normalizedCategoryId] || [];
+}
 
 /**
  * Converts app POI type ids into Google Places API types.
@@ -71,9 +86,7 @@ export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
     return [];
   }
 
-  const mappedTypes = selectedPoiTypes
-    .map((type) => GOOGLE_PLACE_TYPE_MAP[String(type).trim().toLowerCase()])
-    .filter(Boolean);
+  const mappedTypes = selectedPoiTypes.flatMap(getGoogleTypesForCategoryId);
 
   return [...new Set(mappedTypes)];
 }
@@ -93,8 +106,9 @@ export function prioritizeProviderPoiTypesForSearch(
   const explicitlySelectedRestaurant =
     Array.isArray(selectedPoiTypes) &&
     selectedPoiTypes.some((type) => {
-      const normalizedType = String(type).trim().toLowerCase();
-      return GOOGLE_PLACE_TYPE_MAP[normalizedType] === "restaurant";
+      return getGoogleTypesForCategoryId(type).some((googleType) =>
+        RESTAURANT_GOOGLE_TYPES.has(googleType),
+      );
     });
 
   if (!explicitlySelectedRestaurant) {
@@ -102,8 +116,12 @@ export function prioritizeProviderPoiTypesForSearch(
   }
 
   return [
-    "restaurant",
-    ...uniqueProviderTypes.filter((type) => type !== "restaurant"),
+    ...uniqueProviderTypes.filter((type) =>
+      RESTAURANT_GOOGLE_TYPES.has(type),
+    ),
+    ...uniqueProviderTypes.filter(
+      (type) => !RESTAURANT_GOOGLE_TYPES.has(type),
+    ),
   ];
 }
 
@@ -114,13 +132,7 @@ export function getSearchRadiusForType(providerType) {
    * Restaurants, gas, and lodging are often clustered around towns,
    * not exactly beside the sampled highway coordinate
    */
-  if (
-    type === "restaurant" ||
-    type === "cafe" ||
-    type === "bar" ||
-    type === "lodging" ||
-    type === "gas_station"
-  ) {
+  if (WIDER_RADIUS_GOOGLE_TYPES.has(type)) {
     return 6000;
   }
 
@@ -154,6 +166,13 @@ function normalizeGooglePlace(place, fallbackCategory) {
     return null;
   }
 
+  const providerCategory = fallbackCategory || place.primaryType || null;
+  const appCategory =
+    getPoiCategoryIdForGoogleType(fallbackCategory) ||
+    getPoiCategoryIdForGoogleType(place.primaryType) ||
+    getCanonicalPoiCategoryId(fallbackCategory) ||
+    "other";
+
   return {
     id: place.id,
     provider: "google",
@@ -161,7 +180,8 @@ function normalizeGooglePlace(place, fallbackCategory) {
     googlePlaceId: place.id,
 
     name: place.displayName?.text || "Unnamed place",
-    category: fallbackCategory || place.primaryType || "place",
+    category: appCategory,
+    providerCategory,
     googlePrimaryType: place.primaryType || null,
     address: place.formattedAddress || "",
 
