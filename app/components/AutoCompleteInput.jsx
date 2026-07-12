@@ -9,6 +9,9 @@ import {
 } from "react-native";
 import WNInput from "./WNInput";
 import { logger } from "../utils/logger";
+import { isDemoModeEnabled } from "../config/demoMode";
+import { searchPlacesLocally } from "../services/placeSearchService";
+import { trackExternalRequest } from "../services/apiUsageTracker";
 
 const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
 const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
@@ -48,9 +51,7 @@ function normalizeTextSearchPlace(place) {
     title,
     name: title,
     address,
-    description: address
-      ? `${title} · ${place.formattedAddress}`
-      : title,
+    description: address ? `${title} · ${place.formattedAddress}` : title,
     source: "text-search",
   };
 }
@@ -89,32 +90,34 @@ async function fetchRouteTextSearchPredictions({
 
   const searchResults = await Promise.allSettled(
     routeSearchPoints.map(async (point) => {
-      const response = await fetch(
-        "https://places.googleapis.com/v1/places:searchText",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": apiKey,
-            ...getAndroidRestrictionHeaders(),
-            "X-Goog-FieldMask":
-              "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType",
-          },
-          body: JSON.stringify({
-            textQuery: inputText,
-            locationBias: {
-              circle: {
-                center: {
-                  latitude: point.latitude,
-                  longitude: point.longitude,
-                },
-                radius: CUSTOM_TEXT_SEARCH_RADIUS_METERS,
-              },
+      const response = await trackExternalRequest(
+        "google",
+        "places-text-search",
+        () =>
+          fetch("https://places.googleapis.com/v1/places:searchText", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": apiKey,
+              ...getAndroidRestrictionHeaders(),
+              "X-Goog-FieldMask":
+                "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType",
             },
-            regionCode: "CA",
-            maxResultCount: 5,
+            body: JSON.stringify({
+              textQuery: inputText,
+              locationBias: {
+                circle: {
+                  center: {
+                    latitude: point.latitude,
+                    longitude: point.longitude,
+                  },
+                  radius: CUSTOM_TEXT_SEARCH_RADIUS_METERS,
+                },
+              },
+              regionCode: "CA",
+              maxResultCount: 5,
+            }),
           }),
-        },
       );
 
       if (!response.ok) {
@@ -240,6 +243,21 @@ export default function AutocompleteInput({
     try {
       setLoading(true);
 
+      if (isDemoModeEnabled) {
+        const demoPredictions = searchPlacesLocally(inputText).map((place) => ({
+          place_id: place.placeId,
+          name: place.name,
+          address: place.address,
+          description: `${place.name} · ${place.address}`,
+          coords: place.coords,
+          source: "demo",
+        }));
+        if (latestPredictionRequestId.current !== requestId) return;
+        setPredictions(demoPredictions);
+        setShowList(true);
+        return;
+      }
+
       // Build URL with encoded input and API filters
       let url =
         `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
@@ -262,11 +280,16 @@ export default function AutocompleteInput({
 
       url += `&key=${apiKey}`;
 
-      const res = await fetch(url, {
-        headers: {
-          ...getAndroidRestrictionHeaders(),
-        },
-      });
+      const res = await trackExternalRequest(
+        "google",
+        "places-autocomplete",
+        () =>
+          fetch(url, {
+            headers: {
+              ...getAndroidRestrictionHeaders(),
+            },
+          }),
+      );
       const data = await res.json();
 
       if (latestPredictionRequestId.current !== requestId) {
@@ -332,17 +355,22 @@ export default function AutocompleteInput({
    */
   const fetchPlaceDetails = async (placeId, fallbackName = "") => {
     try {
+      if (isDemoModeEnabled) {
+        return null;
+      }
       const url =
         `https://maps.googleapis.com/maps/api/place/details/json?` +
         `place_id=${placeId}` +
         `&fields=name,formatted_address,geometry` +
         `&key=${apiKey}`;
 
-      const res = await fetch(url, {
-        headers: {
-          ...getAndroidRestrictionHeaders(),
-        },
-      });
+      const res = await trackExternalRequest("google", "place-details", () =>
+        fetch(url, {
+          headers: {
+            ...getAndroidRestrictionHeaders(),
+          },
+        }),
+      );
       const data = await res.json();
 
       // Extract and format the location data
@@ -394,10 +422,13 @@ export default function AutocompleteInput({
 
     // Fetch full place details to get coordinates
     const predictionName = getPredictionName(prediction);
-    const details = await fetchPlaceDetails(
-      prediction.place_id,
-      predictionName,
-    );
+    const details = prediction.coords
+      ? {
+          name: predictionName,
+          address: prediction.address,
+          coords: prediction.coords,
+        }
+      : await fetchPlaceDetails(prediction.place_id, predictionName);
 
     // Update with formatted address and notify parent via callback
     if (details) {

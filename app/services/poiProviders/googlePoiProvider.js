@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { trackExternalRequest } from "../apiUsageTracker";
 import {
   getCanonicalPoiCategoryId,
   getGoogleTypesForPoiCategoryIds,
@@ -55,7 +56,9 @@ const WIDER_RADIUS_GOOGLE_TYPES = new Set([
 ]);
 
 function getGoogleTypesForCategoryId(categoryId) {
-  const normalizedCategoryId = String(categoryId || "").trim().toLowerCase();
+  const normalizedCategoryId = String(categoryId || "")
+    .trim()
+    .toLowerCase();
   const configuredTypes = getGoogleTypesForPoiCategoryIds([
     normalizedCategoryId,
   ]);
@@ -116,12 +119,8 @@ export function prioritizeProviderPoiTypesForSearch(
   }
 
   return [
-    ...uniqueProviderTypes.filter((type) =>
-      RESTAURANT_GOOGLE_TYPES.has(type),
-    ),
-    ...uniqueProviderTypes.filter(
-      (type) => !RESTAURANT_GOOGLE_TYPES.has(type),
-    ),
+    ...uniqueProviderTypes.filter((type) => RESTAURANT_GOOGLE_TYPES.has(type)),
+    ...uniqueProviderTypes.filter((type) => !RESTAURANT_GOOGLE_TYPES.has(type)),
   ];
 }
 
@@ -231,40 +230,42 @@ export async function fetchPoisForRoutePointAndType({
     );
   }
 
-  const response = await fetch(GOOGLE_PLACES_NEARBY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Android-Package": androidPackageName,
-      "X-Android-Cert": androidCertSha1,
-      /**
-       * Keep this field mask lean.
-       * More fields can increase cost and payload size.
-       *
-       * We include only what downstream screens need now:
-       * identity, display text, coordinates, category, lightweight quality
-       * signals, and a maps deep link.
-       */
-      "X-Goog-FieldMask":
-        "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri",
-    },
-    body: JSON.stringify({
-      includedTypes: [providerType],
-      maxResultCount,
-      rankPreference: "DISTANCE",
-      regionCode: "CA",
-      locationRestriction: {
-        circle: {
-          center: {
-            latitude: point.latitude,
-            longitude: point.longitude,
-          },
-          radius: radiusMeters,
-        },
+  const response = await trackExternalRequest("google", "places-nearby", () =>
+    fetch(GOOGLE_PLACES_NEARBY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Android-Package": androidPackageName,
+        "X-Android-Cert": androidCertSha1,
+        /**
+         * Keep this field mask lean.
+         * More fields can increase cost and payload size.
+         *
+         * We include only what downstream screens need now:
+         * identity, display text, coordinates, category, lightweight quality
+         * signals, and a maps deep link.
+         */
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri",
       },
+      body: JSON.stringify({
+        includedTypes: [providerType],
+        maxResultCount,
+        rankPreference: "DISTANCE",
+        regionCode: "CA",
+        locationRestriction: {
+          circle: {
+            center: {
+              latitude: point.latitude,
+              longitude: point.longitude,
+            },
+            radius: radiusMeters,
+          },
+        },
+      }),
     }),
-  });
+  );
 
   const data = await response.json();
 

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, ScrollView, Text, View } from "react-native";
 
 import AutocompleteInput from "../components/AutoCompleteInput";
@@ -12,6 +12,8 @@ import CurrentLocationToggle from "../components/CurrentLocationToggle";
 import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
 import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
+import DemoDataIndicator from "../components/DemoDataIndicator";
+import ApiUsageDevCard from "../components/ApiUsageDevCard";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -26,15 +28,18 @@ import {
   geocodeAddress,
   getCurrentLocationWithLabel,
 } from "../services/locationService";
-import { canBuildGoogleRoute } from "../services/googleRoutes";
+import { isDemoModeEnabled } from "../config/demoMode";
+import { DEMO_ROUTE_REQUEST } from "../fixtures/demoData";
 import { logger } from "../utils/logger";
 
 const TRANSPORT_OPTIONS = [
   { key: "driving", label: "Drive", icon: "car" },
   { key: "bicycling", label: "Bike", icon: "bike" },
   { key: "walking", label: "Walk", icon: "walk" },
-  { key: "transit", label: "Transit", icon: "train" },
 ];
+const NEW_ROUTE_TRAVEL_MODES = new Set(
+  TRANSPORT_OPTIONS.map((option) => option.key),
+);
 
 const Navigate = () => {
   const router = useRouter();
@@ -64,8 +69,6 @@ const Navigate = () => {
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [locating, setLocating] = useState(false);
   const [findingRoute, setFindingRoute] = useState(false);
-  const [transitAvailable, setTransitAvailable] = useState(null);
-  const [checkingTransit, setCheckingTransit] = useState(false);
   const [showMoreStopsPaywall, setShowMoreStopsPaywall] = useState(false);
 
   const featureLimits = getFeatureLimits(subscriptionTier);
@@ -79,60 +82,10 @@ const Navigate = () => {
   );
 
   useEffect(() => {
-    let isCurrent = true;
-
-    async function checkTransitAvailability() {
-      if (
-        !isValidCoords(startingCoords) ||
-        !isValidCoords(destinationCoords)
-      ) {
-        setTransitAvailable(null);
-        setCheckingTransit(false);
-        return;
-      }
-
-      try {
-        setCheckingTransit(true);
-
-        const available = await canBuildGoogleRoute({
-          startingCoords,
-          destinationCoords,
-          travelMode: "transit",
-        });
-
-        if (!isCurrent) return;
-
-        setTransitAvailable(available);
-      } finally {
-        if (isCurrent) {
-          setCheckingTransit(false);
-        }
-      }
-    }
-
-    checkTransitAvailability();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [startingCoords, destinationCoords]);
-
-  useEffect(() => {
-    if (transitAvailable === false && selectedTravelMode === "transit") {
+    if (!NEW_ROUTE_TRAVEL_MODES.has(selectedTravelMode)) {
       setSelectedTravelMode("driving");
     }
-  }, [transitAvailable, selectedTravelMode, setSelectedTravelMode]);
-
-  const transportOptions = useMemo(() => {
-    return TRANSPORT_OPTIONS.map((option) => {
-      if (option.key !== "transit") return option;
-
-      return {
-        ...option,
-        disabled: transitAvailable === false || checkingTransit,
-      };
-    });
-  }, [transitAvailable, checkingTransit]);
+  }, [selectedTravelMode, setSelectedTravelMode]);
 
   async function getCurrentLocation() {
     try {
@@ -219,26 +172,6 @@ const Navigate = () => {
         setDestinationCoords(finalDestinationCoords);
       }
 
-      if (selectedTravelMode === "transit") {
-        const transitRouteAvailable = await canBuildGoogleRoute({
-          startingCoords: finalStartCoords,
-          destinationCoords: finalDestinationCoords,
-          travelMode: "transit",
-        });
-
-        if (!transitRouteAvailable) {
-          setTransitAvailable(false);
-          setSelectedTravelMode("driving");
-
-          Alert.alert(
-            "Transit unavailable",
-            "Transit is not available for this route. Please choose another travel mode.",
-          );
-
-          return;
-        }
-      }
-
       clearActiveSavedTrip();
       setActiveRouteRequest({
         source: "navigate",
@@ -268,6 +201,19 @@ const Navigate = () => {
     setShowMoreStopsPaywall(false);
   }
 
+  function handleLoadDemoRoute() {
+    clearActiveSavedTrip();
+    setActiveRouteRequest({
+      ...DEMO_ROUTE_REQUEST,
+      numStops,
+      selectedPoiTypes,
+    });
+    router.push({
+      pathname: "/(screens)/route",
+      params: { returnTo: "/(tabs)/navigate" },
+    });
+  }
+
   if (findingRoute) {
     return (
       <RouteBuildingScreen
@@ -287,6 +233,7 @@ const Navigate = () => {
           title="Navigate"
           description="Enter a starting point and destination, choose your travel mode, and Wander North will build a route with possible stops along the way."
         />
+        <DemoDataIndicator />
 
         <AutocompleteInput
           label="Starting Point"
@@ -346,21 +293,8 @@ const Navigate = () => {
           <WNTransportSelector
             value={selectedTravelMode}
             onChange={setSelectedTravelMode}
-            options={transportOptions}
+            options={TRANSPORT_OPTIONS}
           />
-
-          {checkingTransit && (
-            <Text className="ml-2 mt-1 text-xs text-white/70">
-              Checking transit availability for this route...
-            </Text>
-          )}
-
-          {!checkingTransit && transitAvailable === false && (
-            <Text className="ml-2 mt-1 text-xs text-white/70">
-              Transit is unavailable for this route, so Drive is selected
-              instead.
-            </Text>
-          )}
         </View>
 
         <View className="mt-5 rounded-2xl bg-white/10 p-4">
@@ -406,6 +340,13 @@ const Navigate = () => {
         )}
 
         <View className="mt-8 gap-4">
+          {__DEV__ && isDemoModeEnabled && (
+            <WNButton
+              label="Load Demo Route"
+              onPress={handleLoadDemoRoute}
+              variant="primary"
+            />
+          )}
           <WNButton
             label={findingRoute ? "Building Route..." : "Build Route"}
             onPress={handleFindRoute}
@@ -421,8 +362,8 @@ const Navigate = () => {
         </View>
 
         <PremiumStatusDevCard />
+        <ApiUsageDevCard />
       </View>
-
     </ScrollView>
   );
 };

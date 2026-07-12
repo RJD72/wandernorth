@@ -1,12 +1,6 @@
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import AutocompleteInput from "../components/AutoCompleteInput";
@@ -19,8 +13,11 @@ import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import WNTransportSelector from "../components/WNTransportSelector";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
 import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
+import DemoDataIndicator from "../components/DemoDataIndicator";
 
-import { buildGoogleRoute } from "../services/googleRoutes";
+import { buildRoute } from "../services/routeService";
+import { isDemoModeEnabled } from "../config/demoMode";
+import { DEMO_ROUTE_REQUEST } from "../fixtures/demoData";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -74,19 +71,15 @@ const EXPLORE_TRANSPORT_OPTIONS = [
   { key: "driving", label: "Drive", icon: "car" },
   { key: "bicycling", label: "Bike", icon: "bike" },
   { key: "walking", label: "Walk", icon: "walk" },
-  {
-    key: "transit",
-    label: "Transit",
-    icon: "train",
-    disabled: true,
-  },
 ];
+const NEW_ROUTE_TRAVEL_MODES = new Set(
+  EXPLORE_TRANSPORT_OPTIONS.map((option) => option.key),
+);
 
 const AVERAGE_SPEED_BY_MODE_KMH = {
   driving: 70,
   bicycling: 18,
   walking: 5,
-  transit: 35,
 };
 const MAX_EXPLORE_CANDIDATES = 25;
 
@@ -219,7 +212,7 @@ async function findBestExploreDestination({
    */
   for (const candidate of candidates) {
     try {
-      const routePreview = await buildGoogleRoute({
+      const routePreview = await buildRoute({
         startingCoords: startCoords,
         destinationCoords: candidate.coords,
         travelMode,
@@ -497,14 +490,11 @@ const Explore = () => {
   const [buildingAdventure, setBuildingAdventure] = useState(false);
   const [showExplorePaywall, setShowExplorePaywall] = useState(false);
 
-  const canUseExplore = canUseFeature(
-    subscriptionTier,
-    FEATURES.EXPLORE,
-  );
+  const canUseExplore = canUseFeature(subscriptionTier, FEATURES.EXPLORE);
   const explorePremiumCopy = getPremiumFeatureMessage(FEATURES.EXPLORE);
 
   useEffect(() => {
-    if (selectedTravelMode === "transit") {
+    if (!NEW_ROUTE_TRAVEL_MODES.has(selectedTravelMode)) {
       setSelectedTravelMode("driving");
     }
   }, [selectedTravelMode, setSelectedTravelMode]);
@@ -619,7 +609,9 @@ const Explore = () => {
           ? Math.round(adventureDestination.durationSeconds / 60)
           : driveTimeMinutes;
 
-      const destinationLabel = `${selectedDirectionConfig.label} adventure · about ${matchedMinutes} min from ${
+      const destinationLabel = `${
+        selectedDirectionConfig.label
+      } adventure · about ${matchedMinutes} min from ${
         startingAddress || "your start"
       }`;
 
@@ -654,6 +646,25 @@ const Explore = () => {
     setDriveTimeMinutes(60);
   }
 
+  function handleLoadDemoAdventure() {
+    if (!canUseExplore) {
+      setShowExplorePaywall(true);
+      return;
+    }
+    clearActiveSavedTrip();
+    setActiveRouteRequest({
+      ...DEMO_ROUTE_REQUEST,
+      source: "explore",
+      destinationAddress: "North adventure · Walkerton, Ontario",
+      numStops,
+      selectedPoiTypes,
+    });
+    router.push({
+      pathname: "/(screens)/route",
+      params: { returnTo: "/(tabs)/explore" },
+    });
+  }
+
   if (buildingAdventure) {
     return (
       <RouteBuildingScreen
@@ -673,6 +684,7 @@ const Explore = () => {
           title="Explore"
           description="Pick a starting point, choose a direction, set a travel-time budget, and Wander North will build a route with possible stops along the way."
         />
+        <DemoDataIndicator />
 
         <AutocompleteInput
           label="Starting Point"
@@ -721,9 +733,6 @@ const Explore = () => {
             options={EXPLORE_TRANSPORT_OPTIONS}
           />
 
-          <Text className="ml-2 mt-1 text-xs text-white/70">
-            Transit adventures are unavailable until a destination is known.
-          </Text>
         </View>
 
         <DirectionSelector
@@ -775,6 +784,13 @@ const Explore = () => {
         )}
 
         <View className="mt-8 gap-4">
+          {__DEV__ && isDemoModeEnabled && (
+            <WNButton
+              label="Load Demo Adventure"
+              onPress={handleLoadDemoAdventure}
+              variant="primary"
+            />
+          )}
           <WNButton
             label={
               buildingAdventure ? "Building Adventure..." : "Find Adventure"
@@ -793,7 +809,6 @@ const Explore = () => {
 
         <PremiumStatusDevCard />
       </View>
-
     </ScrollView>
   );
 };

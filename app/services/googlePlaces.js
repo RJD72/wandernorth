@@ -1,3 +1,5 @@
+import { trackExternalRequest } from "./apiUsageTracker";
+
 const GOOGLE_PLACES_BASE_URL = "https://places.googleapis.com/v1";
 
 function getAndroidRestrictionHeaders() {
@@ -64,16 +66,18 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
 
   const apiKey = getGoogleApiKey();
 
-  const response = await fetch(`${GOOGLE_PLACES_BASE_URL}/places/${placeId}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      ...getAndroidRestrictionHeaders(),
-      "X-Goog-FieldMask":
-        "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
-    },
-  });
+  const response = await trackExternalRequest("google", "place-details", () =>
+    fetch(`${GOOGLE_PLACES_BASE_URL}/places/${placeId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        ...getAndroidRestrictionHeaders(),
+        "X-Goog-FieldMask":
+          "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
+      },
+    }),
+  );
 
   if (!response.ok) {
     const errorText = await response.text();

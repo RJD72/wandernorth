@@ -12,10 +12,7 @@
  */
 
 import { logger } from "../utils/logger";
-import {
-  activePoiProviders,
-  primaryPoiProvider,
-} from "./poiProviders";
+import { activePoiProviders, primaryPoiProvider } from "./poiProviders";
 import { getDistanceMeters } from "../utils/routeDistance";
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
@@ -305,6 +302,20 @@ export async function fetchPoisNearRoutePoints({
   }
 
   const settledResults = await Promise.allSettled(requests);
+
+  if (
+    settledResults.length > 0 &&
+    settledResults.every((result) => result.status === "rejected")
+  ) {
+    throw new Error("All POI provider requests failed.");
+  }
+
+  const failedRequestCount = settledResults.filter(
+    (result) => result.status === "rejected",
+  ).length;
+  if (failedRequestCount > settledResults.length / 2) {
+    throw new Error("Most POI provider requests failed.");
+  }
 
   // Keep successful batches; log and ignore failures to preserve resilience.
   const allPois = settledResults.flatMap((result) => {

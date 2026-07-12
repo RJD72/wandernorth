@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { trackExternalRequest } from "../apiUsageTracker";
 import {
   getCanonicalPoiCategoryId,
   getPoiCategoryIdForTomTomQuery,
@@ -52,7 +53,9 @@ const WIDER_RADIUS_TOMTOM_QUERIES = new Set([
 ]);
 
 function getTomTomQueriesForCategoryId(categoryId) {
-  const normalizedCategoryId = String(categoryId || "").trim().toLowerCase();
+  const normalizedCategoryId = String(categoryId || "")
+    .trim()
+    .toLowerCase();
   const configuredQueries = getTomTomQueriesForPoiCategoryIds([
     normalizedCategoryId,
   ]);
@@ -194,9 +197,11 @@ export async function fetchPoisForRoutePointAndType({
     `${TOMTOM_POI_SEARCH_BASE_URL}/${encodedProviderType}.json?` +
     queryParams.toString();
 
-  const response = await fetch(url, {
-    method: "GET",
-  });
+  const response = await trackExternalRequest("tomtom", "poi-search", () =>
+    fetch(url, {
+      method: "GET",
+    }),
+  );
 
   const responseText = await response.text();
   let data = {};
@@ -218,7 +223,9 @@ export async function fetchPoisForRoutePointAndType({
 
   if (!response.ok) {
     logger.log("[poiService] TomTom POI error:", responseText);
-    throw new Error(`TomTom POI request failed with status ${response.status}.`);
+    throw new Error(
+      `TomTom POI request failed with status ${response.status}.`,
+    );
   }
 
   return (data.results || [])

@@ -10,6 +10,7 @@
 // The API key is read from an Expo public environment variable so it is never
 // hard-coded in source. Expo inline EXPO_PUBLIC_* variables at build time.
 import { logger } from "../utils/logger";
+import { trackExternalRequest } from "./apiUsageTracker";
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 const ANDROID_PACKAGE_NAME = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
@@ -25,7 +26,7 @@ const ANDROID_CERT_SHA1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
 // the API call never fails due to a missing travelMode field.
 //
 // Parameters:
-//   mode {string} - One of: "driving" | "walking" | "bicycling" | "transit"
+//   mode {string} - One of: "driving" | "walking" | "bicycling"
 //
 // Returns:
 //   {string} - The corresponding Google Routes API travelMode enum value
@@ -35,7 +36,6 @@ function convertModeToGoogleMode(mode) {
     driving: "DRIVE",
     walking: "WALK",
     bicycling: "BICYCLE",
-    transit: "TRANSIT",
   };
   return modeMap[mode] || "DRIVE";
 }
@@ -111,7 +111,7 @@ export async function buildGoogleRoute({
     travelMode: convertModeToGoogleMode(travelMode),
 
     // TRAFFIC_AWARE requests real-time traffic data for driving routes.
-    // Not applicable for walking/cycling/transit so we omit it for those modes.
+    // Not applicable for walking/cycling so we omit it for those modes.
     routingPreference: travelMode === "driving" ? "TRAFFIC_AWARE" : undefined,
 
     // Only return the single best route — we don't need to display alternatives
@@ -126,26 +126,28 @@ export async function buildGoogleRoute({
     polylineEncoding: "ENCODED_POLYLINE",
   };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  const response = await trackExternalRequest("google", "routes", () =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
 
-      // Required for authentication and billing.
-      // Make sure to restrict this key in production!
-      "X-Goog-Api-Key": GOOGLE_API_KEY,
-      "X-Android-Package": ANDROID_PACKAGE_NAME,
-      "X-Android-Cert": ANDROID_CERT_SHA1,
+        // Required for authentication and billing.
+        // Make sure to restrict this key in production!
+        "X-Goog-Api-Key": GOOGLE_API_KEY,
+        "X-Android-Package": ANDROID_PACKAGE_NAME,
+        "X-Android-Cert": ANDROID_CERT_SHA1,
 
-      // FieldMask controls which fields Google includes in the response.
-      // Specifying only what we need reduces bandwidth and latency.
-      // Deliberately excluded: "legs.steps" (turn-by-turn instructions) since
-      // we only display the overview polyline and summary info.
-      "X-Goog-FieldMask":
-        "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs",
-    },
-    body: JSON.stringify(body),
-  });
+        // FieldMask controls which fields Google includes in the response.
+        // Specifying only what we need reduces bandwidth and latency.
+        // Deliberately excluded: "legs.steps" (turn-by-turn instructions) since
+        // we only display the overview polyline and summary info.
+        "X-Goog-FieldMask":
+          "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs",
+      },
+      body: JSON.stringify(body),
+    }),
+  );
 
   // Parse the JSON body regardless of HTTP status so error details are
   // available for logging even when the request fails.
@@ -191,27 +193,6 @@ export async function buildGoogleRoute({
     // interval). For a simple A→B route there will be exactly one leg.
     legs: route.legs || [],
   };
-}
-
-export async function canBuildGoogleRoute({
-  startingCoords,
-  destinationCoords,
-  travelMode,
-  waypoints = [],
-}) {
-  try {
-    await buildGoogleRoute({
-      startingCoords,
-      destinationCoords,
-      travelMode,
-      waypoints,
-      suppressErrorLog: true,
-    });
-
-    return true;
-  } catch (error) {
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------

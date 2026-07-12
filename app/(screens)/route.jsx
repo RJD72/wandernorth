@@ -19,9 +19,10 @@ import SelectedStopsList from "../components/SelectedStopsList";
 import AddCustomStopCard from "../components/AddCustomStopCard";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
 import CollapsibleSection from "../components/CollapsibleSection";
+import DemoDataIndicator from "../components/DemoDataIndicator";
 
-import { buildGoogleRoute } from "../services/googleRoutes";
-import { fetchPoisNearRoutePoints } from "../services/poiService";
+import { buildRoute } from "../services/routeService";
+import { fetchPoisForRoute } from "../services/poiSearchService";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -156,8 +157,11 @@ const Route = () => {
   const requestedSavedTripMode = mode === "savedTrip";
   const isSavedTripMode = Boolean(
     requestedSavedTripMode &&
-    activeSavedTrip &&
-    activeSavedTrip.id === savedTripId,
+      activeSavedTrip &&
+      activeSavedTrip.id === savedTripId,
+  );
+  const isLegacySavedTransitTrip = Boolean(
+    isSavedTripMode && activeSavedTrip?.routeRequest?.travelMode === "transit",
   );
   const routeRequest = isSavedTripMode
     ? activeSavedTrip.routeRequest
@@ -249,6 +253,13 @@ const Route = () => {
   }
 
   function toggleSelectedStop(stop) {
+    if (isLegacySavedTransitTrip) {
+      setFinalRouteError(
+        "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
+      );
+      return;
+    }
+
     const stopId = getStopId(stop);
 
     clearSaveTripStatus();
@@ -288,6 +299,13 @@ const Route = () => {
   }
 
   function removeAllSelectedStops() {
+    if (isLegacySavedTransitTrip) {
+      setFinalRouteError(
+        "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
+      );
+      return;
+    }
+
     clearSaveTripStatus();
     setFinalRouteData(null);
     setFinalRouteError(null);
@@ -301,6 +319,13 @@ const Route = () => {
 
   function handleAddCustomStop(customStop) {
     if (!customStop) return;
+
+    if (isLegacySavedTransitTrip) {
+      setFinalRouteError(
+        "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
+      );
+      return;
+    }
 
     clearSaveTripStatus();
 
@@ -478,7 +503,7 @@ const Route = () => {
         // Build a single params object to keep service calls explicit and easy to log/debug.
         const parsedParams = { ...routeRequest };
 
-        const result = await buildGoogleRoute(parsedParams);
+        const result = await buildRoute(parsedParams);
 
         if (!isCurrent) return;
 
@@ -552,7 +577,7 @@ const Route = () => {
           routeData.routeCoords,
         );
 
-        const pois = await fetchPoisNearRoutePoints({
+        const pois = await fetchPoisForRoute({
           // The POI service is designed to accept multiple route points and return a consolidated list of nearby POIs, which is more efficient than making separate calls for each point.
           routePoints: routeSamplePoints, // Array of numbers representing strategic points along the route for optimized POI searching.
           selectedPoiTypes, // Array of user-selected POI categories (e.g., ["restaurant", "park"]) that will be mapped to Google Place types within the service.
@@ -645,6 +670,13 @@ const Route = () => {
   async function handleBuildFinalRoute() {
     clearSaveTripStatus();
 
+    if (isLegacySavedTransitTrip) {
+      setFinalRouteError(
+        "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
+      );
+      return;
+    }
+
     if (selectedStops.length === 0) {
       setFinalRouteError(
         "Choose at least one stop before building the final route.",
@@ -684,7 +716,7 @@ const Route = () => {
       setFinalRouteLoading(true);
       setFinalRouteError(null);
 
-      const result = await buildGoogleRoute({
+      const result = await buildRoute({
         startingAddress: routeData.parsedParams.startingAddress,
         destinationAddress: routeData.parsedParams.destinationAddress,
         startingCoords: routeData.parsedParams.startingCoords,
@@ -882,6 +914,15 @@ const Route = () => {
           paddingBottom: Math.max(insets.bottom + 40, 64),
         }}
       >
+        <DemoDataIndicator />
+        {isLegacySavedTransitTrip && (
+          <View className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <Text className="font-semibold text-amber-950">
+              This saved trip uses Transit, which is no longer available for
+              new route planning. You can still view the saved route.
+            </Text>
+          </View>
+        )}
         <CollapsibleSection
           title="Map"
           subtitle="View the route line and selected stop markers."
@@ -920,9 +961,9 @@ const Route = () => {
 
         <CollapsibleSection
           title="Route Summary"
-          subtitle={`${displayedRouteData.distanceText || "Distance unavailable"} · ${
-            displayedRouteData.durationText || "Duration unavailable"
-          }`}
+          subtitle={`${
+            displayedRouteData.distanceText || "Distance unavailable"
+          } · ${displayedRouteData.durationText || "Duration unavailable"}`}
         >
           <RouteSummaryCard
             startingAddress={routeData.parsedParams.startingAddress}
@@ -1060,7 +1101,9 @@ const Route = () => {
                     onToggleStop={toggleSelectedStop}
                     collapsible
                     defaultCollapsed
-                    stopCountLabel={`${group.stops.length} stop${group.stops.length === 1 ? "" : "s"}`}
+                    stopCountLabel={`${group.stops.length} stop${
+                      group.stops.length === 1 ? "" : "s"
+                    }`}
                   />
                 ))}
             </CollapsibleSection>
@@ -1091,8 +1134,8 @@ const Route = () => {
                   finalRouteLoading
                     ? "Building Final Route..."
                     : finalRouteData
-                      ? "Rebuild Final Route"
-                      : "Build Final Route"
+                    ? "Rebuild Final Route"
+                    : "Build Final Route"
                 }
                 onPress={handleBuildFinalRoute}
                 disabled={finalRouteLoading}
@@ -1128,8 +1171,8 @@ const Route = () => {
                     ? "Updating Trip..."
                     : "Saving Trip..."
                   : isSavedTripMode
-                    ? "Update Saved Trip"
-                    : "Save Trip"
+                  ? "Update Saved Trip"
+                  : "Save Trip"
               }
               onPress={handleSaveTrip}
               disabled={

@@ -35,7 +35,7 @@ export const useRoutePlannerStore = create((set) => ({
 
   // The user's chosen travel mode. Consumed by buildGoogleRoute() which maps
   // this to the Google Routes API enum value.
-  // Allowed values: "driving" | "walking" | "bicycling" | "transit"
+  // New route values: "driving" | "walking" | "bicycling"
   selectedTravelMode: "driving",
 
   // How many POI stops to suggest along the route.

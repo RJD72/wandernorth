@@ -6,7 +6,6 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 // Each option drives both behavior (key) and presentation (label/icon).
 const OPTIONS = [
   { key: "driving", label: "Car", icon: "car" },
-  { key: "transit", label: "Transit", icon: "train" },
   { key: "walking", label: "Walk", icon: "walk" },
   { key: "bicycling", label: "Bike", icon: "bike" },
 ];
