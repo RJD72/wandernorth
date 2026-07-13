@@ -6,7 +6,10 @@
     "start": "expo start -c",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -31,6 +34,43 @@
     "react-native-worklets": "0.5.1",
     "tailwindcss": "^3.4.19",
     "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "jest": "~29.7.0",
+    "jest-expo": "~54.0.17"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "collectCoverageFrom": [
+      "app/utils/requestCache.js",
+      "app/services/apiUsageTracker.js",
+      "app/utils/routeSampling.js",
+      "app/utils/routeDistance.js",
+      "app/utils/poiScoring.js",
+      "app/utils/stopUtils.js",
+      "app/config/poiCategories.js",
+      "app/config/featureAccess.js",
+      "app/services/savedTripsService.js",
+      "app/store/useSavedTripsStore.js",
+      "app/store/useEntitlementStore.js",
+      "app/services/routeService.js",
+      "app/services/googleRoutes.js",
+      "app/services/poiSearchService.js",
+      "app/services/poiService.js",
+      "app/services/poiProviders/googlePoiProvider.js",
+      "app/services/poiProviders/tomtomPoiProvider.js",
+      "app/services/locationService.js",
+      "app/services/googlePlaces.js",
+      "app/services/placeSearchService.js"
+    ],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/coverage/",
+      "/.expo/"
+    ]
   },
   "private": true
 }

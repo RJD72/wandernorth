@@ -222,7 +222,10 @@ export async function fetchPoisForRoutePointAndType({
   });
 
   if (!response.ok) {
-    logger.log("[poiService] TomTom POI error:", responseText);
+    logger.log("[poiService] TomTom POI error:", {
+      providerType,
+      status: response.status,
+    });
     throw new Error(
       `TomTom POI request failed with status ${response.status}.`,
     );

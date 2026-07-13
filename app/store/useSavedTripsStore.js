@@ -202,5 +202,9 @@ export const useSavedTripsStore = create((set) => ({
     }
   },
 
-  clearSavedTripsError: () => set({ savedTripsError: null }),
+  clearSavedTripsError: () =>
+    set({
+      savedTripsError: null,
+      savedTripsRecoveryRequired: false,
+    }),
 }));

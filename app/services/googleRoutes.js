@@ -157,10 +157,16 @@ export async function buildGoogleRoute({
   // object under data.error when this happens.
   if (!response.ok) {
     if (!suppressErrorLog) {
-      logger.error("Google Routes API error", data);
+      logger.error("Google Routes API error", { status: response.status });
     }
 
-    throw new Error(data?.error?.message || "Google route request failed");
+    const providerMessage = data?.error?.message;
+    const safeProviderMessage =
+      typeof providerMessage === "string" && GOOGLE_API_KEY
+        ? providerMessage.replaceAll(GOOGLE_API_KEY, "[redacted]")
+        : providerMessage;
+
+    throw new Error(safeProviderMessage || "Google route request failed");
   }
 
   // Guard against a successful HTTP response that contains no route data

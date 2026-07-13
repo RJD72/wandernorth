@@ -279,8 +279,11 @@ export async function fetchPoisForRoutePointAndType({
   });
 
   if (!response.ok) {
-    logger.log("[poiService] Google Places error:", data);
-    throw new Error(data.error?.message || "Google Places request failed.");
+    logger.log("[poiService] Google Places error:", {
+      googleType: providerType,
+      status: response.status,
+    });
+    throw new Error("Google Places request failed.");
   }
 
   return (data.places || [])

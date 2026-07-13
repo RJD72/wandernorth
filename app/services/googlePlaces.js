@@ -80,10 +80,8 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-
     throw new Error(
-      `Google Place Details failed: ${response.status} ${errorText}`,
+      `Google Place Details failed with status ${response.status}.`,
     );
   }
 
