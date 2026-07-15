@@ -5,5 +5,7 @@ export function trackEvent(eventName, properties = {}) {
 
   // Future provider adapters (GA, Plausible, PostHog, Meta) belong here,
   // after consent and privacy requirements are in place.
-  window.dispatchEvent(new CustomEvent("wander-north:analytics", { detail: event }));
+  window.dispatchEvent(
+    new CustomEvent("wander-north:analytics", { detail: event }),
+  );
 }

@@ -1,4 +1,12 @@
-export default function Section({ id, eyebrow, title, intro, tone = "light", children, className = "" }) {
+export default function Section({
+  id,
+  eyebrow,
+  title,
+  intro,
+  tone = "light",
+  children,
+  className = "",
+}) {
   return (
     <section id={id} className={`section section--${tone} ${className}`}>
       <div className="shell">
