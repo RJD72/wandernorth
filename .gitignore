@@ -2,6 +2,8 @@
 
 # dependencies
 node_modules/
+landing-page/node_modules/
+landing-page/dist/
 
 # Expo
 .expo/

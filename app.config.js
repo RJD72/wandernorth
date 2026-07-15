@@ -80,6 +80,9 @@ module.exports = {
       // Enables file-based routing and navigation conventions via Expo Router.
       "expo-router",
 
+      // Registers the Expo Font native module used by Expo Vector Icons.
+      "expo-font",
+
       // Configures native location permissions text for iOS.
       [
         "expo-location",
