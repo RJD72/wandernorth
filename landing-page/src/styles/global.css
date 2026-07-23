@@ -294,6 +294,15 @@ p {
 .hero-media {
   transform: rotate(1.5deg);
 }
+.hero-media-asset {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 1.5rem;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.3);
+}
 .media-placeholder {
   position: relative;
   width: 100%;
@@ -1025,6 +1034,10 @@ p {
   }
 }
 @media (max-width: 720px) {
+  .hero-media-asset,
+  .hero-media > .media-placeholder {
+    aspect-ratio: 4/5;
+  }
   .menu-button {
     display: grid;
     place-items: center;

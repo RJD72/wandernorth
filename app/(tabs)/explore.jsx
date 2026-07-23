@@ -732,7 +732,6 @@ const Explore = () => {
             onChange={setSelectedTravelMode}
             options={EXPLORE_TRANSPORT_OPTIONS}
           />
-
         </View>
 
         <DirectionSelector
@@ -807,7 +806,7 @@ const Explore = () => {
           />
         </View>
 
-        <PremiumStatusDevCard />
+        {/* <PremiumStatusDevCard /> */}
       </View>
     </ScrollView>
   );

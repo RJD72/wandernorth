@@ -361,8 +361,8 @@ const Navigate = () => {
           />
         </View>
 
-        <PremiumStatusDevCard />
-        <ApiUsageDevCard />
+        {/* <PremiumStatusDevCard />
+        <ApiUsageDevCard /> */}
       </View>
     </ScrollView>
   );

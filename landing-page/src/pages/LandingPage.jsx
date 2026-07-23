@@ -2,6 +2,7 @@ import Header from "../components/layout/Header.jsx";
 import Footer from "../components/layout/Footer.jsx";
 import Section from "../components/layout/Section.jsx";
 import MediaPlaceholder from "../components/media/MediaPlaceholder.jsx";
+import HeroMedia from "../components/media/HeroMedia.jsx";
 import WaitlistForm from "../components/forms/WaitlistForm.jsx";
 import TripPreview from "../components/landing/TripPreview.jsx";
 import {
@@ -57,8 +58,7 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="hero-media">
-              {/* Set mediaAssets.heroDemo.src to a video, image, screenshot, or phone mockup. */}
-              <MediaPlaceholder asset={mediaAssets.heroDemo} eager />
+              <HeroMedia asset={mediaAssets.heroDemo} />
             </div>
           </div>
         </section>

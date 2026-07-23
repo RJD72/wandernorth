@@ -17,7 +17,7 @@ import { getDistanceMeters } from "../utils/routeDistance";
 
 // Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
 const MAX_ROUTE_POINTS_TO_SEARCH = 5;
-const MAX_POI_TYPES_TO_SEARCH = 2;
+const MAX_POI_TYPES_TO_SEARCH = 3;
 const CROSS_PROVIDER_DUPLICATE_DISTANCE_METERS = 75;
 
 export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
