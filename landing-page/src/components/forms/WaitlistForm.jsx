@@ -110,7 +110,7 @@ export default function WaitlistForm({
     setMessage("");
     const payload = {
       ...submissionValues,
-      website: undefined,
+      website: submissionValues.website,
       referralSource: getReferralSource(),
       submittedAt: new Date().toISOString(),
     };
