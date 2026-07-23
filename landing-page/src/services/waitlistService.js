@@ -18,13 +18,19 @@ export async function submitWaitlist(payload) {
 
   const response = await fetch(ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    credentials: "same-origin",
     body: JSON.stringify(payload),
   });
 
   if (!response.ok)
     throw new Error(
-      "We could not add you right now. Please check your details and try again.",
+      response.status === 429
+        ? "Too many signup attempts. Please wait a few minutes and try again."
+        : "We could not add you right now. Please check your details and try again.",
     );
   return { persisted: true, developmentFallback: false };
 }
