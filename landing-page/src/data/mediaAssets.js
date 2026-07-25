@@ -15,7 +15,7 @@ export const mediaAssets = {
   },
   couplesDayTrip: {
     type: "image",
-    src: "",
+    src: "/images/a-spontaneous-couples-drive.png",
     alt: "A couple enjoying a spontaneous Ontario day trip",
     label: "couples-day-trip-placeholder",
     recommendedSize: "1200 × 900",
@@ -23,7 +23,7 @@ export const mediaAssets = {
   },
   familyAdventure: {
     type: "image",
-    src: "",
+    src: "/images/a-family-day-trip.png",
     alt: "A family exploring a local Ontario attraction",
     label: "family-adventure-placeholder",
     recommendedSize: "1200 × 900",
@@ -31,7 +31,7 @@ export const mediaAssets = {
   },
   motorcycleRoute: {
     type: "image",
-    src: "",
+    src: "/images/a-motorcycle-route.png",
     alt: "Motorcycle riders on a scenic Ontario road",
     label: "motorcycle-route-placeholder",
     recommendedSize: "1200 × 900",
@@ -39,7 +39,7 @@ export const mediaAssets = {
   },
   campingExcursion: {
     type: "image",
-    src: "",
+    src: "/images/a-camping-side-excursion.png",
     alt: "Campers taking a nearby day excursion",
     label: "camping-excursion-placeholder",
     recommendedSize: "1200 × 900",
@@ -47,7 +47,7 @@ export const mediaAssets = {
   },
   smallTownMarket: {
     type: "image",
-    src: "",
+    src: "/images/a-small-town-food-tour.png",
     alt: "A lively small-town Ontario market",
     label: "small-town-market-placeholder",
     recommendedSize: "1200 × 900",
@@ -55,7 +55,7 @@ export const mediaAssets = {
   },
   scenicSundayDrive: {
     type: "image",
-    src: "",
+    src: "/images/a-scenic-sunday-drive.png",
     alt: "A scenic Sunday drive through Ontario",
     label: "scenic-drive-placeholder",
     recommendedSize: "1200 × 900",
@@ -63,7 +63,7 @@ export const mediaAssets = {
   },
   founderStory: {
     type: "video",
-    src: "",
+    src: "/media/founder-story.mp4",
     poster: "",
     alt: "The story behind Wander North",
     label: "Founder story placeholder",
