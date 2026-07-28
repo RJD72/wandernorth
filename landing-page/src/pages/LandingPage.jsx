@@ -40,14 +40,20 @@ export default function LandingPage() {
                 <a
                   className="button"
                   href="#waitlist"
-                  onClick={() => trackEvent("hero_cta_clicked")}
+                  onClick={() =>
+                    trackEvent("hero_cta_click", { cta_location: "hero" })
+                  }
                 >
                   Join the Early Access List
                 </a>
                 <a
                   className="button button--ghost"
                   href="#how-it-works"
-                  onClick={() => trackEvent("how_it_works_clicked")}
+                  onClick={() =>
+                    trackEvent("how_it_works_click", {
+                      cta_location: "hero",
+                    })
+                  }
                 >
                   See How It Works <span aria-hidden="true">↓</span>
                 </a>
@@ -237,7 +243,11 @@ export default function LandingPage() {
                 key={question}
                 onToggle={(event) =>
                   event.currentTarget.open &&
-                  trackEvent("faq_opened", { question })
+                  trackEvent("faq_opened", {
+                    question_id: `faq_${faqs.findIndex(
+                      ([item]) => item === question,
+                    ) + 1}`,
+                  })
                 }
               >
                 <summary>

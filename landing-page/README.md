@@ -58,9 +58,9 @@ The app's existing `assets/` directory is Vite's public asset source, so the cur
 
 ## Analytics and campaign attribution
 
-`trackEvent(eventName, properties)` lives in `src/services/analyticsService.js`. Development events are visible in the console, and no analytics script or cookie is installed. Add a consent experience before enabling non-essential Google Analytics, Plausible, PostHog, or Meta tracking.
+`trackEvent(eventName, properties)` and the GA4 adapter live in `src/services/analyticsService.js`. Set `VITE_GA_MEASUREMENT_ID` for production builds. Analytics stays disabled during local development unless `VITE_GA_ENABLE_IN_DEVELOPMENT=true` is set explicitly. The current page has waitlist privacy language but no analytics-consent control; add a reviewed consent experience where policy or applicable law requires one.
 
-The page currently emits events for hero/header/final CTAs, How It Works, form starts/submissions, travel style, pricing, early testing, FAQ opens, and demo media. `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content` are captured from the URL and included under `referralSource` in every waitlist record.
+The page emits events for hero/header/final CTAs, How It Works, form starts and outcomes, travel style, pricing, early testing, FAQ opens, and demo media. GA4 receives only allowlisted, non-identifying properties. Page locations exclude query strings, while sanitized campaign values remain available for attribution. `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content` are also captured from the URL and included under `referralSource` in every waitlist record.
 
 ## SEO and deployment
 

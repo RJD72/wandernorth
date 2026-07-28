@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trackEvent } from "../../services/analyticsService.js";
 import {
   getReferralSource,
@@ -84,10 +84,14 @@ export default function WaitlistForm({
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
+  const formStartTracked = useRef(false);
   const set = (name, value) =>
     setValues((current) => ({ ...current, [name]: value }));
-  const begin = () =>
-    status === "idle" && trackEvent("waitlist_form_started", { source });
+  const begin = () => {
+    if (formStartTracked.current) return;
+    formStartTracked.current = true;
+    trackEvent("waitlist_form_start", { form_location: source });
+  };
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -102,6 +106,10 @@ export default function WaitlistForm({
     const nextErrors = validate(submissionValues);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
+      trackEvent("waitlist_signup_error", {
+        form_location: source,
+        reason_category: "validation",
+      });
       setStatus("error");
       setMessage("Please fix the highlighted fields.");
       return;
@@ -116,10 +124,10 @@ export default function WaitlistForm({
     };
     try {
       const result = await submitWaitlist(payload);
-      trackEvent("waitlist_form_submitted", {
-        source,
-        travelStyle: values.travelStyle,
-        persisted: result.persisted,
+      trackEvent("waitlist_signup_success", {
+        form_location: source,
+        result_type: result.persisted ? "persisted" : "development_simulation",
+        travel_style: values.travelStyle,
       });
       setStatus("success");
       setMessage(
@@ -129,6 +137,12 @@ export default function WaitlistForm({
       );
       setValues(initial);
     } catch (error) {
+      trackEvent("waitlist_signup_error", {
+        form_location: source,
+        reason_category: error.message.startsWith("Too many")
+          ? "rate_limited"
+          : "submission_failed",
+      });
       setStatus("error");
       setMessage(error.message);
     }
@@ -212,7 +226,10 @@ export default function WaitlistForm({
               value={values.travelStyle}
               onChange={(e) => {
                 set("travelStyle", e.target.value);
-                trackEvent("travel_style_selected", { value: e.target.value });
+                trackEvent("travel_style_selected", {
+                  form_location: source,
+                  travel_style: e.target.value,
+                });
               }}
               aria-invalid={Boolean(errors.travelStyle)}
             >
@@ -255,8 +272,9 @@ export default function WaitlistForm({
               value={values.pricingPreference}
               onChange={(e) => {
                 set("pricingPreference", e.target.value);
-                trackEvent("pricing_option_selected", {
-                  value: e.target.value,
+                trackEvent("pricing_preference_selected", {
+                  form_location: source,
+                  pricing_option: e.target.value,
                 });
               }}
             >
@@ -272,7 +290,10 @@ export default function WaitlistForm({
               checked={values.wantsEarlyTesting}
               onChange={(e) => {
                 set("wantsEarlyTesting", e.target.checked);
-                if (e.target.checked) trackEvent("early_tester_selected");
+                if (e.target.checked)
+                  trackEvent("early_tester_selected", {
+                    form_location: source,
+                  });
               }}
             />
             <span>
@@ -292,7 +313,10 @@ export default function WaitlistForm({
         className="button button--full"
         type="submit"
         disabled={status === "loading"}
-        onClick={() => compact && trackEvent("final_cta_clicked")}
+        onClick={() =>
+          compact &&
+          trackEvent("final_cta_click", { cta_location: "final_cta" })
+        }
       >
         {status === "loading"
           ? "Joining…"

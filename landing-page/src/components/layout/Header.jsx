@@ -53,7 +53,9 @@ export default function Header() {
             href="#waitlist"
             onClick={() => {
               follow();
-              trackEvent("header_cta_clicked");
+              trackEvent("header_cta_click", {
+                cta_location: "header",
+              });
             }}
           >
             Join Early Access

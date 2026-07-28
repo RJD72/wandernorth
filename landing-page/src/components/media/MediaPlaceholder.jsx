@@ -30,7 +30,7 @@ export default function MediaPlaceholder({
     <button
       className={`media-placeholder ${compact ? "media-placeholder--compact" : ""}`}
       type="button"
-      onClick={() => trackEvent("demo_media_clicked", { asset: asset.label })}
+      onClick={() => trackEvent("demo_media_click")}
       aria-label={`${asset.label}. ${asset.recommendedSize}.`}
     >
       <span className="media-sun" aria-hidden="true" />
