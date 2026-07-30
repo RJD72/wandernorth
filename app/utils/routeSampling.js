@@ -51,9 +51,7 @@ export function getSamplePointsAlongRoute(routeCoords = []) {
   if (validRouteCoords.length === 0) return [];
   if (validRouteCoords.length === 1) return [validRouteCoords[0]];
 
-  const cumulativePoints = [
-    { coord: validRouteCoords[0], distanceMeters: 0 },
-  ];
+  const cumulativePoints = [{ coord: validRouteCoords[0], distanceMeters: 0 }];
   let totalDistanceMeters = 0;
 
   for (let index = 1; index < validRouteCoords.length; index += 1) {
@@ -62,10 +60,7 @@ export function getSamplePointsAlongRoute(routeCoords = []) {
       validRouteCoords[index],
     );
 
-    if (
-      !Number.isFinite(segmentDistanceMeters) ||
-      segmentDistanceMeters < 0
-    ) {
+    if (!Number.isFinite(segmentDistanceMeters) || segmentDistanceMeters < 0) {
       return getIndexBasedSamplePoints(validRouteCoords);
     }
 

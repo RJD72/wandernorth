@@ -134,7 +134,7 @@ export function createDemoRoute({
     distanceText: `${(distanceMeters / 1000).toFixed(1)} km`,
     duration: `${seconds}s`,
     durationText: `${Math.floor(seconds / 3600)} hr ${Math.round(
-      (seconds % 3600) / 60
+      (seconds % 3600) / 60,
     )} min`,
     encodedPolyline: polyline.encode(coords),
     legs: [],
@@ -148,6 +148,6 @@ export function searchDemoPlaces(query) {
     .toLowerCase();
   if (value.length < 2) return [];
   return DEMO_PLACE_RESULTS.filter((p) =>
-    `${p.name} ${p.address}`.toLowerCase().includes(value)
+    `${p.name} ${p.address}`.toLowerCase().includes(value),
   );
 }

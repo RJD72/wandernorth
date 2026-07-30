@@ -37,12 +37,9 @@ export function isPremiumTier(subscriptionTier) {
   return subscriptionTier === SUBSCRIPTION_TIERS.PREMIUM;
 }
 
-export function getFeatureLimits(
-  subscriptionTier = SUBSCRIPTION_TIERS.FREE,
-) {
+export function getFeatureLimits(subscriptionTier = SUBSCRIPTION_TIERS.FREE) {
   return (
-    FEATURE_LIMITS[subscriptionTier] ??
-    FEATURE_LIMITS[SUBSCRIPTION_TIERS.FREE]
+    FEATURE_LIMITS[subscriptionTier] ?? FEATURE_LIMITS[SUBSCRIPTION_TIERS.FREE]
   );
 }
 

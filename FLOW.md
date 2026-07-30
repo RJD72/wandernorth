@@ -14,11 +14,11 @@ This document describes the code present in this repository on 2026-07-12. It is
 
 All three in-memory request caches are created in `app/services/apiRequestCaches.js` by `createRequestCache` from `app/utils/requestCache.js`.
 
-| Cache | Key builder | TTL | Maximum entries | Used for |
-|---|---|---:|---:|---|
-| `routeRequestCache` | `createRouteRequestKey` in `app/utils/requestKeys.js` | 3 minutes | 40 | Google Routes results, including waypoint order |
-| `poiRequestCache` | `createPoiRequestKey` in `app/utils/requestKeys.js` | 10 minutes | 40 | Whole route-POI batches, including provider ids |
-| `geocodeRequestCache` | normalized lower-case address string | 20 minutes | 75 | Forward geocoding |
+| Cache                 | Key builder                                           |        TTL | Maximum entries | Used for                                        |
+| --------------------- | ----------------------------------------------------- | ---------: | --------------: | ----------------------------------------------- |
+| `routeRequestCache`   | `createRouteRequestKey` in `app/utils/requestKeys.js` |  3 minutes |              40 | Google Routes results, including waypoint order |
+| `poiRequestCache`     | `createPoiRequestKey` in `app/utils/requestKeys.js`   | 10 minutes |              40 | Whole route-POI batches, including provider ids |
+| `geocodeRequestCache` | normalized lower-case address string                  | 20 minutes |              75 | Forward geocoding                               |
 
 `createRequestCache.load` first checks the completed-result `Map`, then the in-flight `Map`. A completed hit returns a deep JSON clone. A matching in-flight request returns the same Promise, preventing a duplicate request. A miss runs `loader`, stores a clone with an expiry, evicts the least-recently-used first entry when over capacity, and removes the in-flight entry in `finally`. `clearApiRequestCaches` clears completed entries only; it does not clear the in-flight maps.
 
@@ -200,36 +200,31 @@ flowchart TD
   A["Type in custom AutocompleteInput"] --> B["handleInputChange"]
   B --> C["300ms useEffect debounce"]
   C --> D["fetchPredictions"]
-  D --> E["Tracked Google Places Autocomplete"]
-  E --> F["fetchRouteTextSearchPredictions"]
-  F --> G["Promise.allSettled across route sample points"]
-  G --> H["Tracked Google Places Text Search requests"]
-  H --> I["mergePredictions"]
-  I --> J["Prediction press -> handleSelect"]
-  J --> K["fetchPlaceDetails if prediction has no coords"]
-  K --> L["AddCustomStopCard onSelectLocation callback"]
-  L --> M["Add Custom Stop press"]
-  M --> N["AddCustomStopCard.handleAddCustomStop"]
-  N --> O["Route.handleAddCustomStop callback"]
-  O --> P["attachRoutePositionToPois"]
-  P --> Q["setSelectedStops"]
-  Q --> R["React rerender; final route invalidated"]
+  D --> E["Tracked Autocomplete (New) with route-midpoint bias"]
+  E --> F["Prediction press -> handleSelect"]
+  F --> G["Place Details (New) with matching session token"]
+  G --> H["AddCustomStopCard onSelectLocation callback"]
+  H --> I["Add Custom Stop press"]
+  I --> J["AddCustomStopCard.handleAddCustomStop"]
+  J --> K["Route.handleAddCustomStop callback"]
+  K --> L["attachRoutePositionToPois"]
+  L --> M["setSelectedStops"]
+  M --> N["React rerender; final route invalidated"]
 ```
 
 ### Numbered walkthrough
 
-1. **Derived search geography — verified.** Route calculates `customStopLocationBias` from the original route midpoint and calls `getSamplePointsAlongRoute` for `customSearchPoints`. It passes both into `AddCustomStopCard`, which passes them to `AutocompleteInput` with inline dropdown and `autocompleteTypes={null}`.
+1. **Derived search geography — verified.** Route calculates `customStopLocationBias` from the original route midpoint and passes it through `AddCustomStopCard` to `AutocompleteInput` with an inline dropdown.
 2. **Typing event/debounce — verified.** `AutocompleteInput.handleInputChange` sets local `isTyping`, updates `input`, and calls `AddCustomStopCard`'s `onChangeText`, which clears previously selected coordinates/metadata. A `useEffect` waits 300 ms; cleanup cancels the timer after newer input. It then calls async `fetchPredictions`.
-3. **Autocomplete request — verified.** Outside demo mode, `fetchPredictions` calls tracked `google:places-autocomplete` against the legacy Google Places Autocomplete JSON endpoint, using country Canada, midpoint location bias, and no type restriction for this card.
-4. **Route-aware text requests — verified.** After autocomplete returns, custom-stop conditions call `fetchRouteTextSearchPredictions`. It searches at most five valid route sample points concurrently with `Promise.allSettled`, each via tracked `google:places-text-search` POST to Places v1 `places:searchText`, with a 12,000-metre circle and five-result limit. Failed point searches are silently omitted. `mergePredictions` removes duplicate place ids and puts text-search results first.
-5. **Stale callback protection — verified.** `latestPredictionRequestId` increments for each fetch/selection. Results from an older request return without setting state. This prevents stale UI updates but does not abort the HTTP calls.
-6. **Prediction selection — verified.** The prediction `Pressable` calls `handleSelect`. It closes UI, optimistically updates the parent, then either uses coordinates embedded in a demo prediction or awaits private `fetchPlaceDetails`, a tracked `google:place-details` request to the legacy details JSON endpoint. Text-search normalized predictions do not retain `place.location`, so they also take this details path.
-7. **Component callback — verified.** `handleSelect` calls `AddCustomStopCard`'s `onSelectLocation(address, coords, metadata)`, which stores local address, coordinate, and place metadata. These React state updates rerender the card.
-8. **Add button event — verified.** The `Add Custom Stop` `WNButton` calls `AddCustomStopCard.handleAddCustomStop`. It validates non-empty text and selected coordinates, derives name/address, constructs a custom object with a generated id and Google place id, then calls Route's `handleAddCustomStop` prop callback.
-9. **Route attachment — verified.** `Route.handleAddCustomStop` enforces route readiness, transit/entitlement/total-stop limits, then calls `attachRoutePositionToPois([customStop], routeData.routeCoords)`. It invalidates `finalRouteData`, marks reopened trips dirty, and appends the route-aware stop with functional `setSelectedStops`.
-10. **Next step — verified.** Adding the stop does not automatically rebuild the final route. The user must follow Flow 4's Build Final Route action.
+3. **Autocomplete request — verified.** Outside demo mode, `fetchPredictions` calls tracked `google:places-autocomplete` against Places Autocomplete (New), restricting results to Canada and applying the route-midpoint circle as `locationBias`. A session token is reused across predictions in the interaction. There is no route-point Text Search matrix.
+4. **Stale callback protection — verified.** `latestPredictionRequestId` increments for input changes, fetches, and selection. Superseded prediction/detail requests are aborted, and older results return without setting state.
+5. **Prediction selection — verified.** The prediction `Pressable` calls `handleSelect`. It closes UI, optimistically updates the parent, then either uses coordinates embedded in a demo prediction or awaits private `fetchPlaceDetails`, which delegates to a tracked Place Details (New) request with the matching session token.
+6. **Component callback — verified.** `handleSelect` calls `AddCustomStopCard`'s `onSelectLocation(address, coords, metadata)`, which stores local address, coordinate, and place metadata. These React state updates rerender the card.
+7. **Add button event — verified.** The `Add Custom Stop` `WNButton` calls `AddCustomStopCard.handleAddCustomStop`. It validates non-empty text and selected coordinates, derives name/address, constructs a custom object with a generated id and Google place id, then calls Route's `handleAddCustomStop` prop callback.
+8. **Route attachment — verified.** `Route.handleAddCustomStop` enforces route readiness, transit/entitlement/total-stop limits, then calls `attachRoutePositionToPois([customStop], routeData.routeCoords)`. It invalidates `finalRouteData`, marks reopened trips dirty, and appends the route-aware stop with functional `setSelectedStops`.
+9. **Next step — verified.** Adding the stop does not automatically rebuild the final route. The user must follow Flow 4's Build Final Route action.
 
-There is no request cache or in-flight request deduplication in `AutocompleteInput`; its debounce and request-id guard reduce UI churn but do not reuse or cancel provider work.
+There is no result cache or in-flight request deduplication in `AutocompleteInput`; its debounce reduces provider work, while abort controllers and request ids cancel or ignore superseded work.
 
 ## 6. Save and reopen a trip
 
@@ -279,17 +274,16 @@ flowchart TD
 
 ## Verified external-provider request inventory
 
-| Caller | Tracked id | External operation | Cache/dedupe |
-|---|---|---|---|
-| `geocodeAddress` — `app/services/locationService.js` | `google:geocoding` | `Location.geocodeAsync` | `geocodeRequestCache` |
-| `getCurrentLocationWithLabel` — same file | `google:reverse-geocoding` | `Location.reverseGeocodeAsync` after device permission/location | None |
-| `buildGoogleRoute` — `app/services/googleRoutes.js` | `google:routes` | Google Routes v2 `computeRoutes` POST | `routeRequestCache` in caller |
-| Google `fetchPoisForRoutePointAndType` — `app/services/poiProviders/googlePoiProvider.js` | `google:places-nearby` | Places v1 Nearby Search POST | Whole batch cached by `poiRequestCache` |
-| TomTom `fetchPoisForRoutePointAndType` — `app/services/poiProviders/tomtomPoiProvider.js` | `tomtom:poi-search` | TomTom POI Search GET | Whole batch cached by `poiRequestCache` |
-| `fetchPredictions` — `app/components/AutoCompleteInput.jsx` | `google:places-autocomplete` | Places Autocomplete JSON GET | None; 300 ms debounce only |
-| `fetchRouteTextSearchPredictions` — same file | `google:places-text-search` | Places v1 Text Search POST per route point | None; concurrent `Promise.allSettled` |
-| private `fetchPlaceDetails` — same file | `google:place-details` | Legacy Place Details JSON GET | None |
-| `fetchGooglePlaceDetailsForStop` — `app/services/googlePlaces.js` | `google:place-details` | Places v1 details GET | None |
+| Caller                                                                                    | Tracked id                   | External operation                                              | Cache/dedupe                                         |
+| ----------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| `geocodeAddress` — `app/services/locationService.js`                                      | `google:geocoding`           | `Location.geocodeAsync`                                         | `geocodeRequestCache`                                |
+| `getCurrentLocationWithLabel` — same file                                                 | `google:reverse-geocoding`   | `Location.reverseGeocodeAsync` after device permission/location | None                                                 |
+| `buildGoogleRoute` — `app/services/googleRoutes.js`                                       | `google:routes`              | Google Routes v2 `computeRoutes` POST                           | `routeRequestCache` in caller                        |
+| Google `fetchPoisForRoutePointAndType` — `app/services/poiProviders/googlePoiProvider.js` | `google:places-nearby`       | Places v1 Nearby Search POST                                    | Whole batch cached by `poiRequestCache`              |
+| TomTom `fetchPoisForRoutePointAndType` — `app/services/poiProviders/tomtomPoiProvider.js` | `tomtom:poi-search`          | TomTom POI Search GET                                           | Whole batch cached by `poiRequestCache`              |
+| `fetchPredictions` — `app/components/AutoCompleteInput.jsx`                               | `google:places-autocomplete` | Places Autocomplete (New) POST                                  | None; 300 ms debounce, abort, and stale-result guard |
+| `fetchPlaceDetailsNew` — `app/services/googlePlacesAutocomplete.js`                       | `google:place-details`       | Place Details (New) GET                                         | None                                                 |
+| `fetchGooglePlaceDetailsForStop` — `app/services/googlePlaces.js`                         | `google:place-details`       | Places v1 details GET                                           | None                                                 |
 
 `trackExternalRequest` labels Expo geocoding as Google, but the exact native geocoder/provider selected by Expo Location is platform/runtime-dependent. That provider identity is an assumption in tracker naming, not statically proven network behavior.
 
@@ -308,7 +302,7 @@ flowchart TD
 - Navigate and Explore duplicate `getCurrentLocation`, travel-mode correction effects, planner inputs, reset concepts, and the clear-saved-trip -> set-active-request -> route-navigation sequence.
 - Route building occurs in Explore candidate probing and again after navigation. The second call normally reuses `routeRequestCache`, but the `routePreview` object itself is discarded.
 - Two different functions named `fetchPoisForRoutePointAndType` exist, one per provider. This is intentional interface duplication; calls are dynamically dispatched through provider objects.
-- Two Google place-detail paths exist: private legacy `fetchPlaceDetails` in `AutoCompleteInput.jsx` for coordinate resolution, and `fetchGooglePlaceDetailsForStop` in `googlePlaces.js` for rich POI details.
+- Two Places API (New) detail paths exist: `fetchPlaceDetailsNew` in `googlePlacesAutocomplete.js` for autocomplete coordinate resolution, and `fetchGooglePlaceDetailsForStop` in `googlePlaces.js` for rich POI details.
 - Coordinate validation exists as exported `isValidCoords` and as private `isValidCoordinate`/`isValidSearchPoint` helpers in several files.
 - Route sampling selects up to five distance-based points; `fetchPoisNearRoutePoints` then runs its own private `getEvenlySpacedRoutePoints` cap over those points.
 
@@ -322,87 +316,86 @@ flowchart TD
 
 ## File responsibility table
 
-| File | Responsibility in the traced flows |
-|---|---|
-| `app/(tabs)/navigate.jsx` | Navigate form, geocoding fallback, planner-store snapshot, route navigation |
-| `app/(tabs)/explore.jsx` | Adventure form, destination candidate geometry/scoring, sequential preview routes, route navigation |
-| `app/(screens)/route.jsx` | Central route/POI/final-route/custom-stop/save/reopen orchestration and local UI state |
-| `app/(tabs)/saved-trips.jsx` | Saved list loading, reopen navigation, rename/delete/clear UI |
-| `app/(tabs)/_layout.jsx` | Registers tab screens |
-| `app/(screens)/_layout.jsx` | Registers stack screen presentation/navigation options |
-| `app/components/AutoCompleteInput.jsx` | Debounced autocomplete, route-aware text search, coordinate detail lookup, stale-result guard |
-| `app/components/AddCustomStopCard.jsx` | Custom-stop selection state, validation, object construction, callback to Route |
-| `app/components/SuggestedStopsList.jsx` | POI list interaction and lazy rich Google detail loading |
-| `app/components/SelectedStopsList.jsx` | Selected-stop removal callbacks |
-| `app/components/MapComponent.jsx` | Renders route coordinates and selected-stop markers |
-| `app/components/ApiUsageDevCard.jsx` | Displays tracker snapshot; resets usage and completed caches |
-| `app/components/WNButton.jsx` | Shared pressable button wrapper used by flow entry events |
-| `app/store/useRoutePlannerStore.js` | Shared planner fields and submitted `activeRouteRequest` |
-| `app/store/useSavedTripsStore.js` | Saved-trip async actions, list/error state, transient `activeSavedTrip` |
-| `app/store/useEntitlementStore.js` | In-memory mock subscription tier and testing actions |
-| `app/config/featureAccess.js` | Feature limits and premium gate messages |
-| `app/config/demoMode.js` | Build-time demo-mode switch |
-| `app/config/poiCategories.js` | Canonical category metadata and Google/TomTom mappings/legacy aliases |
-| `app/services/locationService.js` | Current location, forward/reverse geocoding, geocode caching/tracking |
-| `app/services/routeService.js` | Route facade, demo branch, route cache/dedup/tracking hooks |
-| `app/services/googleRoutes.js` | Google Routes request construction and response normalization |
-| `app/services/poiSearchService.js` | POI facade, demo branch, whole-batch cache/dedup/tracking hooks |
-| `app/services/poiService.js` | Provider request matrix, concurrency, failure policy, POI deduplication |
-| `app/services/poiProviders/index.js` | Provider registry and environment-controlled activation |
-| `app/services/poiProviders/googlePoiProvider.js` | Google category translation, Nearby Search, normalized Google POIs |
-| `app/services/poiProviders/tomtomPoiProvider.js` | TomTom category translation, POI Search, normalized TomTom POIs |
-| `app/services/googlePlaces.js` | Lazy rich detail/photo metadata for Google-backed suggested stops |
-| `app/services/placeSearchService.js` | Demo-only local autocomplete facade |
-| `app/services/savedTripsService.js` | Serialized AsyncStorage persistence, schema validation/migration, CRUD |
-| `app/services/apiRequestCaches.js` | Cache instances, sizes/TTLs, manual completed-cache clearing |
-| `app/services/apiUsageTracker.js` | In-memory operation/request/cache counters and subscriptions |
-| `app/utils/requestCache.js` | Generic TTL/LRU-style completed cache and in-flight Promise deduplication |
-| `app/utils/requestKeys.js` | Stable route and POI cache keys |
-| `app/utils/routeSampling.js` | Distance-based route search samples |
-| `app/utils/routeDistance.js` | POI/custom-stop proximity and progress along route |
-| `app/utils/poiScoring.js` | POI score and route-distributed selection |
-| `app/utils/stopUtils.js` | Cross-shape stop id/title/address/coordinate accessors |
-| `app/utils/coordinates.js` | Planner coordinate validation |
-| `app/utils/poiDistancePolicy.js` | Shared 3,000-metre route proximity limit |
-| `app/fixtures/demoData.js` | In-process demo route, POI, and place results |
-| `app.config.js`, `babel.config.js`, `metro.config.js`, `tailwind.config.js`, `global.css` | Expo/build/styling configuration; no direct function step in these six flows |
-| `package.json`, `package-lock.json` | Dependency/runtime declarations; no direct function step |
-| `assets/**`, `places.txt`, `results.json` | Static/project data; no verified call in the six execution paths |
+| File                                                                                      | Responsibility in the traced flows                                                                  |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `app/(tabs)/navigate.jsx`                                                                 | Navigate form, geocoding fallback, planner-store snapshot, route navigation                         |
+| `app/(tabs)/explore.jsx`                                                                  | Adventure form, destination candidate geometry/scoring, sequential preview routes, route navigation |
+| `app/(screens)/route.jsx`                                                                 | Central route/POI/final-route/custom-stop/save/reopen orchestration and local UI state              |
+| `app/(tabs)/saved-trips.jsx`                                                              | Saved list loading, reopen navigation, rename/delete/clear UI                                       |
+| `app/(tabs)/_layout.jsx`                                                                  | Registers tab screens                                                                               |
+| `app/(screens)/_layout.jsx`                                                               | Registers stack screen presentation/navigation options                                              |
+| `app/components/AutoCompleteInput.jsx`                                                    | Debounced autocomplete, route-aware text search, coordinate detail lookup, stale-result guard       |
+| `app/components/AddCustomStopCard.jsx`                                                    | Custom-stop selection state, validation, object construction, callback to Route                     |
+| `app/components/SuggestedStopsList.jsx`                                                   | POI list interaction and lazy rich Google detail loading                                            |
+| `app/components/SelectedStopsList.jsx`                                                    | Selected-stop removal callbacks                                                                     |
+| `app/components/MapComponent.jsx`                                                         | Renders route coordinates and selected-stop markers                                                 |
+| `app/components/ApiUsageDevCard.jsx`                                                      | Displays tracker snapshot; resets usage and completed caches                                        |
+| `app/components/WNButton.jsx`                                                             | Shared pressable button wrapper used by flow entry events                                           |
+| `app/store/useRoutePlannerStore.js`                                                       | Shared planner fields and submitted `activeRouteRequest`                                            |
+| `app/store/useSavedTripsStore.js`                                                         | Saved-trip async actions, list/error state, transient `activeSavedTrip`                             |
+| `app/store/useEntitlementStore.js`                                                        | In-memory mock subscription tier and testing actions                                                |
+| `app/config/featureAccess.js`                                                             | Feature limits and premium gate messages                                                            |
+| `app/config/demoMode.js`                                                                  | Build-time demo-mode switch                                                                         |
+| `app/config/poiCategories.js`                                                             | Canonical category metadata and Google/TomTom mappings/legacy aliases                               |
+| `app/services/locationService.js`                                                         | Current location, forward/reverse geocoding, geocode caching/tracking                               |
+| `app/services/routeService.js`                                                            | Route facade, demo branch, route cache/dedup/tracking hooks                                         |
+| `app/services/googleRoutes.js`                                                            | Google Routes request construction and response normalization                                       |
+| `app/services/poiSearchService.js`                                                        | POI facade, demo branch, whole-batch cache/dedup/tracking hooks                                     |
+| `app/services/poiService.js`                                                              | Provider request matrix, concurrency, failure policy, POI deduplication                             |
+| `app/services/poiProviders/index.js`                                                      | Provider registry and environment-controlled activation                                             |
+| `app/services/poiProviders/googlePoiProvider.js`                                          | Google category translation, Nearby Search, normalized Google POIs                                  |
+| `app/services/poiProviders/tomtomPoiProvider.js`                                          | TomTom category translation, POI Search, normalized TomTom POIs                                     |
+| `app/services/googlePlaces.js`                                                            | Lazy rich detail/photo metadata for Google-backed suggested stops                                   |
+| `app/services/placeSearchService.js`                                                      | Demo-only local autocomplete facade                                                                 |
+| `app/services/savedTripsService.js`                                                       | Serialized AsyncStorage persistence, schema validation/migration, CRUD                              |
+| `app/services/apiRequestCaches.js`                                                        | Cache instances, sizes/TTLs, manual completed-cache clearing                                        |
+| `app/services/apiUsageTracker.js`                                                         | In-memory operation/request/cache counters and subscriptions                                        |
+| `app/utils/requestCache.js`                                                               | Generic TTL/LRU-style completed cache and in-flight Promise deduplication                           |
+| `app/utils/requestKeys.js`                                                                | Stable route and POI cache keys                                                                     |
+| `app/utils/routeSampling.js`                                                              | Distance-based route search samples                                                                 |
+| `app/utils/routeDistance.js`                                                              | POI/custom-stop proximity and progress along route                                                  |
+| `app/utils/poiScoring.js`                                                                 | POI score and route-distributed selection                                                           |
+| `app/utils/stopUtils.js`                                                                  | Cross-shape stop id/title/address/coordinate accessors                                              |
+| `app/utils/coordinates.js`                                                                | Planner coordinate validation                                                                       |
+| `app/utils/poiDistancePolicy.js`                                                          | Shared 3,000-metre route proximity limit                                                            |
+| `app/fixtures/demoData.js`                                                                | In-process demo route, POI, and place results                                                       |
+| `app.config.js`, `babel.config.js`, `metro.config.js`, `tailwind.config.js`, `global.css` | Expo/build/styling configuration; no direct function step in these six flows                        |
+| `package.json`, `package-lock.json`                                                       | Dependency/runtime declarations; no direct function step                                            |
+| `assets/**`, `places.txt`, `results.json`                                                 | Static/project data; no verified call in the six execution paths                                    |
 
 Presentational components not individually expanded above (`CollapsibleSection`, `CurrentLocationToggle`, `DemoDataIndicator`, `POITypeSelector`, `PremiumFeatureCard`, `PremiumStatusDevCard`, `RouteBuildingOverlay`, `RouteBuildingScreen`, `RouteSummaryCard`, `ScreenIntroCard`, `StopCountDropdown`, `WNInput`, `WNRadioButton`, `WNTransportSelector`, and `AnimatedIcon`) render or forward callbacks but do not introduce a provider/store/service step beyond the flows described.
 
 ## Function-to-function dependency table
 
-| Caller | Callee(s), in execution order where applicable | Purpose |
-|---|---|---|
-| `Navigate.handleFindRoute` | `isValidCoords` -> `geocodeAddress` as needed -> `clearActiveSavedTrip` -> `setActiveRouteRequest` -> `router.push` | Submit Navigate request |
-| `Explore.handleFindAdventure` | `isValidCoords` -> `geocodeAddress` -> `findBestExploreDestination` -> `clearActiveSavedTrip` -> `setActiveRouteRequest` -> `router.push` | Submit Explore request |
-| `findBestExploreDestination` | `getExploreDestinationCandidates` -> repeated `buildRoute` -> `parseGoogleDurationSeconds` -> `scoreExploreCandidate` | Probe and rank generated destinations |
-| `getExploreDestinationCandidates` | repeated `getDestinationFromBearing` | Generate coordinate candidates |
-| `Route.loadRoute` | `loadTripById` for missing saved record, or `isValidCoords` -> `buildRoute`; then polyline decode | Restore or build route geometry |
-| `buildRoute` | `recordHighLevelOperation` -> `createRouteRequestKey` -> `routeRequestCache.load` -> `buildGoogleRoute` | Route facade/cache |
-| `buildGoogleRoute` | `convertModeToGoogleMode` -> `trackExternalRequest` -> `fetch` -> `response.json` -> `formatDistance`/`formatDuration` | External route request/normalization |
-| `Route.loadSuggestedStops` | `getSamplePointsAlongRoute` -> `fetchPoisForRoute` -> `attachRoutePositionToPois` -> `getCanonicalPoiCategoryIds` -> `chooseDistributedStops` | Produce UI POI lists |
-| `fetchPoisForRoute` | `createPoiRequestKey` -> `poiRequestCache.load` -> `fetchPoisNearRoutePoints` | POI batch facade/cache |
-| `fetchPoisNearRoutePoints` | `getEvenlySpacedRoutePoints` -> provider mapping/radius functions -> provider `fetchPoisForRoutePointAndType` -> `Promise.allSettled` -> `dedupePois` -> `dedupeLikelySamePlacesAcrossProviders` | Fetch and consolidate candidates |
-| Google provider `fetchPoisForRoutePointAndType` | `trackExternalRequest` -> `fetch` -> private `normalizeGooglePlace` | Google nearby candidates |
-| TomTom provider `fetchPoisForRoutePointAndType` | `trackExternalRequest` -> `fetch` -> private `normalizeTomTomResult` | TomTom candidates |
-| `attachRoutePositionToPois` | repeated `getClosestRoutePointInfo` -> segment/distance helpers | Add route proximity/progress |
-| `chooseDistributedStops` | private validation/progress helpers -> repeated `scorePoi` -> category/bucket/fill passes | Rank/distribute top stops |
-| `SuggestedStopsList.loadDetails` | `fetchGooglePlaceDetailsForStop` -> `trackExternalRequest` -> `fetch` | Lazy rich place details |
-| `AutocompleteInput.fetchPredictions` | `trackExternalRequest` autocomplete -> optional `fetchRouteTextSearchPredictions` -> `mergePredictions` | Custom/route input predictions |
-| `fetchRouteTextSearchPredictions` | per-point `trackExternalRequest`/`fetch` -> `Promise.allSettled` -> `normalizeTextSearchPlace` | Route-biased text results |
-| `AutocompleteInput.handleSelect` | `getPredictionName` -> optional private `fetchPlaceDetails` -> parent `onSelectLocation` | Resolve chosen prediction |
-| `AddCustomStopCard.handleAddCustomStop` | `isValidCoords` -> private `getNameAndAddressFromDescription` -> Route `handleAddCustomStop` callback | Construct custom stop |
-| `Route.handleAddCustomStop` | `getCustomStopCount` -> `attachRoutePositionToPois` -> `setSelectedStops` | Attach/append custom stop |
-| `Route.toggleSelectedStop` | `getStopId` -> `setSelectedStops` functional callback | Add/remove a selected stop |
-| `Route.handleBuildFinalRoute` | `sortStopsByRouteProgress` -> repeated `getStopCoords` -> `buildRoute` -> polyline decode | Build waypoint route |
-| `Route.handleSaveTrip` | `sortStopsByRouteProgress` -> `addTrip` or `updateTrip` | Persist final trip |
-| `useSavedTripsStore.addTrip` | service `saveTrip` -> service `loadSavedTrips` -> Zustand `set` | Add and refresh saved list |
-| service `saveTrip` | `enqueue` -> `validatePayload` -> `readEnvelope` -> `normalizeStoredTrips` -> `writeEnvelope` | Serialized local save |
-| `SavedTrips.handleOpenSavedTrip` | `setActiveSavedTrip` -> `router.push` | Start reopen navigation |
-| `useSavedTripsStore.loadTripById` | service `loadSavedTripById` -> Zustand `set` | Hydrate missing active trip |
-| service `loadSavedTripById` | `enqueue` -> `requireId` -> `readEnvelope` | Serialized local lookup |
+| Caller                                          | Callee(s), in execution order where applicable                                                                                                                                                   | Purpose                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `Navigate.handleFindRoute`                      | `isValidCoords` -> `geocodeAddress` as needed -> `clearActiveSavedTrip` -> `setActiveRouteRequest` -> `router.push`                                                                              | Submit Navigate request                                       |
+| `Explore.handleFindAdventure`                   | `isValidCoords` -> `geocodeAddress` -> `findBestExploreDestination` -> `clearActiveSavedTrip` -> `setActiveRouteRequest` -> `router.push`                                                        | Submit Explore request                                        |
+| `findBestExploreDestination`                    | `getExploreDestinationCandidates` -> repeated `buildRoute` -> `parseGoogleDurationSeconds` -> `scoreExploreCandidate`                                                                            | Probe and rank generated destinations                         |
+| `getExploreDestinationCandidates`               | repeated `getDestinationFromBearing`                                                                                                                                                             | Generate coordinate candidates                                |
+| `Route.loadRoute`                               | `loadTripById` for missing saved record, or `isValidCoords` -> `buildRoute`; then polyline decode                                                                                                | Restore or build route geometry                               |
+| `buildRoute`                                    | `recordHighLevelOperation` -> `createRouteRequestKey` -> `routeRequestCache.load` -> `buildGoogleRoute`                                                                                          | Route facade/cache                                            |
+| `buildGoogleRoute`                              | `convertModeToGoogleMode` -> `trackExternalRequest` -> `fetch` -> `response.json` -> `formatDistance`/`formatDuration`                                                                           | External route request/normalization                          |
+| `Route.loadSuggestedStops`                      | `getSamplePointsAlongRoute` -> `fetchPoisForRoute` -> `attachRoutePositionToPois` -> `getCanonicalPoiCategoryIds` -> `chooseDistributedStops`                                                    | Produce UI POI lists                                          |
+| `fetchPoisForRoute`                             | `createPoiRequestKey` -> `poiRequestCache.load` -> `fetchPoisNearRoutePoints`                                                                                                                    | POI batch facade/cache                                        |
+| `fetchPoisNearRoutePoints`                      | `getEvenlySpacedRoutePoints` -> provider mapping/radius functions -> provider `fetchPoisForRoutePointAndType` -> `Promise.allSettled` -> `dedupePois` -> `dedupeLikelySamePlacesAcrossProviders` | Fetch and consolidate candidates                              |
+| Google provider `fetchPoisForRoutePointAndType` | `trackExternalRequest` -> `fetch` -> private `normalizeGooglePlace`                                                                                                                              | Google nearby candidates                                      |
+| TomTom provider `fetchPoisForRoutePointAndType` | `trackExternalRequest` -> `fetch` -> private `normalizeTomTomResult`                                                                                                                             | TomTom candidates                                             |
+| `attachRoutePositionToPois`                     | repeated `getClosestRoutePointInfo` -> segment/distance helpers                                                                                                                                  | Add route proximity/progress                                  |
+| `chooseDistributedStops`                        | private validation/progress helpers -> repeated `scorePoi` -> category/bucket/fill passes                                                                                                        | Rank/distribute top stops                                     |
+| `SuggestedStopsList.loadDetails`                | `fetchGooglePlaceDetailsForStop` -> `trackExternalRequest` -> `fetch`                                                                                                                            | Lazy rich place details                                       |
+| `AutocompleteInput.fetchPredictions`            | `fetchAutocompletePredictions` -> `trackExternalRequest` -> Places Autocomplete (New) POST                                                                                                       | Canadian predictions with optional route-midpoint bias        |
+| `AutocompleteInput.handleSelect`                | `getPredictionName` -> optional `fetchPlaceDetailsNew` -> parent `onSelectLocation`                                                                                                              | Resolve the chosen prediction with the matching session token |
+| `AddCustomStopCard.handleAddCustomStop`         | `isValidCoords` -> private `getNameAndAddressFromDescription` -> Route `handleAddCustomStop` callback                                                                                            | Construct custom stop                                         |
+| `Route.handleAddCustomStop`                     | `getCustomStopCount` -> `attachRoutePositionToPois` -> `setSelectedStops`                                                                                                                        | Attach/append custom stop                                     |
+| `Route.toggleSelectedStop`                      | `getStopId` -> `setSelectedStops` functional callback                                                                                                                                            | Add/remove a selected stop                                    |
+| `Route.handleBuildFinalRoute`                   | `sortStopsByRouteProgress` -> repeated `getStopCoords` -> `buildRoute` -> polyline decode                                                                                                        | Build waypoint route                                          |
+| `Route.handleSaveTrip`                          | `sortStopsByRouteProgress` -> `addTrip` or `updateTrip`                                                                                                                                          | Persist final trip                                            |
+| `useSavedTripsStore.addTrip`                    | service `saveTrip` -> service `loadSavedTrips` -> Zustand `set`                                                                                                                                  | Add and refresh saved list                                    |
+| service `saveTrip`                              | `enqueue` -> `validatePayload` -> `readEnvelope` -> `normalizeStoredTrips` -> `writeEnvelope`                                                                                                    | Serialized local save                                         |
+| `SavedTrips.handleOpenSavedTrip`                | `setActiveSavedTrip` -> `router.push`                                                                                                                                                            | Start reopen navigation                                       |
+| `useSavedTripsStore.loadTripById`               | service `loadSavedTripById` -> Zustand `set`                                                                                                                                                     | Hydrate missing active trip                                   |
+| service `loadSavedTripById`                     | `enqueue` -> `requireId` -> `readEnvelope`                                                                                                                                                       | Serialized local lookup                                       |
 
 ## Glossary for a beginning JavaScript developer
 
@@ -473,11 +466,10 @@ Use source-map-aware breakpoints in the Expo/React Native debugger. Conditional 
 ### Custom stop
 
 1. `AutocompleteInput.handleInputChange` and its debounce effect in `app/components/AutoCompleteInput.jsx`.
-2. `fetchPredictions` — after autocomplete JSON and before/after `fetchRouteTextSearchPredictions`.
-3. `fetchRouteTextSearchPredictions` — inspect each point and `Promise.allSettled` results.
-4. `handleSelect` — inspect whether details are fetched and callback metadata.
-5. `AddCustomStopCard.handleAddCustomStop` in `app/components/AddCustomStopCard.jsx` — inspect the constructed stop.
-6. `Route.handleAddCustomStop` — before limits, after `attachRoutePositionToPois`, and inside functional `setSelectedStops`.
+2. `fetchPredictions` — before/after `fetchAutocompletePredictions`; inspect the reused session token and route-midpoint bias.
+3. `handleSelect` — inspect the matching Place Details (New) session token and callback metadata.
+4. `AddCustomStopCard.handleAddCustomStop` in `app/components/AddCustomStopCard.jsx` — inspect the constructed stop.
+5. `Route.handleAddCustomStop` — before limits, after `attachRoutePositionToPois`, and inside functional `setSelectedStops`.
 
 ### Save/reopen
 
@@ -487,4 +479,3 @@ Use source-map-aware breakpoints in the Expo/React Native debugger. Conditional 
 4. `SavedTrips.handleOpenSavedTrip` in `app/(tabs)/saved-trips.jsx` — inspect trip id before Zustand and navigation.
 5. Saved branch of `Route.loadRoute` — active-record decision, polyline decode, and the three restore state writes.
 6. First guard of `Route.loadSuggestedStops` — confirm saved mode exits without provider work.
-

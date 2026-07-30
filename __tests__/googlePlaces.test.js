@@ -2,15 +2,15 @@ const FAKE_KEY = "test-places-key-not-real";
 
 function loadSubject() {
   jest.resetModules();
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = FAKE_KEY;
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY = FAKE_KEY;
   process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME = "com.example.test";
   process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1 = "AA:BB:CC";
   global.fetch = jest.fn();
   const tracker = require("../app/services/apiUsageTracker");
   tracker.resetApiUsage();
   return {
-    fetchGooglePlaceDetailsForStop:
-      require("../app/services/googlePlaces").fetchGooglePlaceDetailsForStop,
+    fetchGooglePlaceDetailsForStop: require("../app/services/googlePlaces")
+      .fetchGooglePlaceDetailsForStop,
     tracker,
   };
 }
@@ -26,14 +26,16 @@ function response(data, { ok = true, status = 200, text = "" } = {}) {
 
 describe("googlePlaces details contract", () => {
   afterEach(() => {
-    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    delete process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY;
     delete process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
     delete process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
   });
 
   test("missing Place ID avoids requests", async () => {
     const { fetchGooglePlaceDetailsForStop } = loadSubject();
-    await expect(fetchGooglePlaceDetailsForStop({ id: "provider-only" })).resolves.toMatchObject({
+    await expect(
+      fetchGooglePlaceDetailsForStop({ id: "provider-only" }),
+    ).resolves.toMatchObject({
       googlePlaceId: null,
       imageUrls: [],
       source: "no-google-place-id",
@@ -87,7 +89,7 @@ describe("googlePlaces details contract", () => {
     });
   });
 
-  test("photo URLs are capped at five and use the configured key", async () => {
+  test("photo URLs are capped at one and use the configured key", async () => {
     const { fetchGooglePlaceDetailsForStop } = loadSubject();
     fetch.mockResolvedValue(
       response({
@@ -100,7 +102,7 @@ describe("googlePlaces details contract", () => {
     const result = await fetchGooglePlaceDetailsForStop({
       googlePlaceId: "place-one",
     });
-    expect(result.imageUrls).toHaveLength(5);
+    expect(result.imageUrls).toHaveLength(1);
     expect(result.imageUrls[0]).toBe(
       `https://places.googleapis.com/v1/places/place-one/photos/0/media?maxWidthPx=900&key=${FAKE_KEY}`,
     );
@@ -125,7 +127,9 @@ describe("googlePlaces details contract", () => {
     const { fetchGooglePlaceDetailsForStop, tracker } = loadSubject();
     fetch
       .mockResolvedValueOnce(response({ id: "one" }))
-      .mockResolvedValueOnce(response({}, { ok: false, status: 500, text: "bad" }));
+      .mockResolvedValueOnce(
+        response({}, { ok: false, status: 400, text: "bad" }),
+      );
     await fetchGooglePlaceDetailsForStop({ googlePlaceId: "one" });
     await expect(
       fetchGooglePlaceDetailsForStop({ googlePlaceId: "two" }),
@@ -133,7 +137,7 @@ describe("googlePlaces details contract", () => {
     expect(
       tracker
         .getApiUsageSnapshot()
-        .find((entry) => entry.operation === "place-details"),
+        .find((entry) => entry.operation === "place-details-rich"),
     ).toMatchObject({ started: 2, succeeded: 1, failed: 1 });
   });
 
@@ -151,11 +155,11 @@ describe("googlePlaces details contract", () => {
     expect(caught.message).not.toContain(FAKE_KEY);
   });
 
-  test("repeated details calls are uncached by the current service contract", async () => {
+  test("repeated details calls reuse the bounded details cache", async () => {
     const { fetchGooglePlaceDetailsForStop } = loadSubject();
     fetch.mockResolvedValue(response({ id: "one" }));
     await fetchGooglePlaceDetailsForStop({ googlePlaceId: "one" });
     await fetchGooglePlaceDetailsForStop({ googlePlaceId: "one" });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

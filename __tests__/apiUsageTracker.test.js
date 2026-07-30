@@ -104,19 +104,21 @@ describe("apiUsageTracker", () => {
       succeeded: 1,
       started: 0,
     });
-    expect(getApiUsageSnapshot().some((entry) => entry.provider === "google")).toBe(
-      false,
-    );
-    expect(getApiUsageSnapshot().some((entry) => entry.provider === "tomtom")).toBe(
-      false,
-    );
+    expect(
+      getApiUsageSnapshot().some((entry) => entry.provider === "google"),
+    ).toBe(false);
+    expect(
+      getApiUsageSnapshot().some((entry) => entry.provider === "tomtom"),
+    ).toBe(false);
   });
 
   test("snapshots contain counters, not request payload details", async () => {
     await trackExternalRequest("google", "routes", async () => ({ ok: true }));
     const serialized = JSON.stringify(getApiUsageSnapshot());
 
-    expect(serialized).not.toMatch(/api.?key|authorization|latitude|longitude|address|payload/i);
+    expect(serialized).not.toMatch(
+      /api.?key|authorization|latitude|longitude|address|payload/i,
+    );
   });
 
   test("subscribers are notified and can unsubscribe", () => {

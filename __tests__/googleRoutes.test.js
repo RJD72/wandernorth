@@ -24,7 +24,7 @@ function jsonResponse(data, { ok = true, status = 200 } = {}) {
 
 function loadSubject() {
   jest.resetModules();
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = FAKE_KEY;
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY = FAKE_KEY;
   process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME = "com.example.test";
   process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1 = "AA:BB:CC";
   global.fetch = jest.fn();
@@ -45,13 +45,13 @@ const baseParams = {
 
 describe("googleRoutes adapter contract", () => {
   afterEach(() => {
-    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    delete process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY;
     delete process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
     delete process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
   });
 
   test.each([
-    ["driving", "DRIVE", "TRAFFIC_AWARE"],
+    ["driving", "DRIVE", undefined],
     ["walking", "WALK", undefined],
     ["bicycling", "BICYCLE", undefined],
   ])("builds the expected %s request", async (mode, googleMode, preference) => {
@@ -90,6 +90,14 @@ describe("googleRoutes adapter contract", () => {
     }
   });
 
+  test("requests traffic only for an explicitly final driving route", async () => {
+    const { buildGoogleRoute } = loadSubject();
+    fetch.mockResolvedValue(jsonResponse({ routes: [successRoute()] }));
+    await buildGoogleRoute({ ...baseParams, purpose: "final" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.routingPreference).toBe("TRAFFIC_AWARE");
+  });
+
   test("preserves ordered intermediate waypoints", async () => {
     const { buildGoogleRoute } = loadSubject();
     fetch.mockResolvedValue(jsonResponse({ routes: [successRoute()] }));
@@ -109,7 +117,6 @@ describe("googleRoutes adapter contract", () => {
     const raw = successRoute();
     fetch.mockResolvedValue(jsonResponse({ routes: [raw] }));
     await expect(buildGoogleRoute(baseParams)).resolves.toEqual({
-      raw,
       distanceMeters: 12500,
       distanceText: "12.5 km",
       duration: "5400s",
@@ -142,7 +149,9 @@ describe("googleRoutes adapter contract", () => {
   test("missing route results reject clearly", async () => {
     const { buildGoogleRoute } = loadSubject();
     fetch.mockResolvedValue(jsonResponse({ routes: [] }));
-    await expect(buildGoogleRoute(baseParams)).rejects.toThrow("No routes found");
+    await expect(buildGoogleRoute(baseParams)).rejects.toThrow(
+      "No routes found",
+    );
   });
 
   test("malformed success responses reject", async () => {
@@ -154,14 +163,19 @@ describe("googleRoutes adapter contract", () => {
   test("non-OK responses are tracked as failures", async () => {
     const { buildGoogleRoute, tracker } = loadSubject();
     fetch.mockResolvedValue(
-      jsonResponse({ error: { message: "Denied" } }, { ok: false, status: 403 }),
+      jsonResponse(
+        { error: { message: "Denied" } },
+        { ok: false, status: 403 },
+      ),
     );
-    await expect(buildGoogleRoute(baseParams)).rejects.toThrow("Denied");
+    await expect(buildGoogleRoute(baseParams)).rejects.toThrow(
+      "google request failed",
+    );
     expect(tracker.getApiUsageSnapshot()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           provider: "google",
-          operation: "routes",
+          operation: "routes-preview",
           started: 1,
           failed: 1,
           succeeded: 0,
@@ -179,7 +193,7 @@ describe("googleRoutes adapter contract", () => {
       expect.arrayContaining([
         expect.objectContaining({
           provider: "google",
-          operation: "routes",
+          operation: "routes-preview",
           started: 1,
           succeeded: 1,
           failed: 0,

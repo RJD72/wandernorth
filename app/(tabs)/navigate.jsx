@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, Text, View } from "react-native";
 
 import AutocompleteInput from "../components/AutoCompleteInput";
@@ -11,9 +11,8 @@ import ScreenIntroCard from "../components/ScreenIntroCard";
 import CurrentLocationToggle from "../components/CurrentLocationToggle";
 import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
-import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
 import DemoDataIndicator from "../components/DemoDataIndicator";
-import ApiUsageDevCard from "../components/ApiUsageDevCard";
+import BetaInfoCard from "../components/BetaInfoCard";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -29,6 +28,7 @@ import {
   getCurrentLocationWithLabel,
 } from "../services/locationService";
 import { isDemoModeEnabled } from "../config/demoMode";
+import { allowDeveloperControls } from "../config/buildConfig";
 import { DEMO_ROUTE_REQUEST } from "../fixtures/demoData";
 import { logger } from "../utils/logger";
 
@@ -42,6 +42,7 @@ const NEW_ROUTE_TRAVEL_MODES = new Set(
 );
 
 const Navigate = () => {
+  const routeSubmissionInFlight = useRef(false);
   const router = useRouter();
 
   const {
@@ -133,12 +134,15 @@ const Navigate = () => {
   }
 
   async function handleFindRoute() {
+    if (routeSubmissionInFlight.current) return;
+
     if (isOverFreeStopLimit) {
       setShowMoreStopsPaywall(true);
       return;
     }
 
     try {
+      routeSubmissionInFlight.current = true;
       setFindingRoute(true);
 
       let finalStartCoords = startingCoords;
@@ -191,6 +195,7 @@ const Navigate = () => {
         },
       });
     } finally {
+      routeSubmissionInFlight.current = false;
       setFindingRoute(false);
     }
   }
@@ -234,6 +239,7 @@ const Navigate = () => {
           description="Enter a starting point and destination, choose your travel mode, and Wander North will build a route with possible stops along the way."
         />
         <DemoDataIndicator />
+        <BetaInfoCard />
 
         <AutocompleteInput
           label="Starting Point"
@@ -340,7 +346,7 @@ const Navigate = () => {
         )}
 
         <View className="mt-8 gap-4">
-          {__DEV__ && isDemoModeEnabled && (
+          {allowDeveloperControls && isDemoModeEnabled && (
             <WNButton
               label="Load Demo Route"
               onPress={handleLoadDemoRoute}

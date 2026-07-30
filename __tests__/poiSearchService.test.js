@@ -13,6 +13,7 @@ function loadSubject({ demo = false, providerIds = ["google"] } = {}) {
   jest.doMock("../app/config/demoMode", () => ({ isDemoModeEnabled: demo }));
   jest.doMock("../app/services/poiService", () => ({
     fetchPoisNearRoutePoints: jest.fn(),
+    getLastPoiSearchMetadata: jest.fn(() => null),
   }));
   jest.doMock("../app/services/poiProviders", () => ({
     activePoiProviders,
@@ -49,9 +50,9 @@ describe("poiSearchService contract", () => {
 
   test("demo mode respects zero requested stops and records no provider outbound call", async () => {
     const { fetchPoisForRoute, tracker } = loadSubject({ demo: true });
-    await expect(fetchPoisForRoute({ ...params, numStops: 0 })).resolves.toEqual(
-      [],
-    );
+    await expect(
+      fetchPoisForRoute({ ...params, numStops: 0 }),
+    ).resolves.toEqual([]);
     expect(
       tracker
         .getApiUsageSnapshot()

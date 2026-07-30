@@ -34,8 +34,10 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
 .env
+.env.*
+!.env.example
+!**/.env.example
 
 # typescript
 *.tsbuildinfo
@@ -43,3 +45,19 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# credentials and cloud-service configuration
+**/google-services.json
+**/*service-account*.json
+**/*credentials*.json
+credentials.json
+credentials/
+.eas/
+
+# local build artifacts and credential exports
+*.apk
+*.aab
+*.keystore
+*.der
+*.cer
+*.crt

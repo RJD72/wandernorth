@@ -86,7 +86,9 @@ describe("useSavedTripsStore integration", () => {
     services.loadSavedTrips.mockRejectedValue(
       Object.assign(new Error("disk"), { code: "read-failed" }),
     );
-    await expect(useSavedTripsStore.getState().loadTrips()).resolves.toEqual([]);
+    await expect(useSavedTripsStore.getState().loadTrips()).resolves.toEqual(
+      [],
+    );
     expect(useSavedTripsStore.getState().savedTripsError).toBe(
       "Unable to load saved trips.",
     );
@@ -126,13 +128,18 @@ describe("useSavedTripsStore integration", () => {
       tripTwo,
     );
     expect(services.saveTrip).toHaveBeenCalledWith(tripTwo);
-    expect(useSavedTripsStore.getState().savedTrips).toEqual([tripTwo, tripOne]);
+    expect(useSavedTripsStore.getState().savedTrips).toEqual([
+      tripTwo,
+      tripOne,
+    ]);
   });
 
   test("failed addTrip preserves existing trips", async () => {
     resetStore({ savedTrips: [tripOne] });
     services.saveTrip.mockRejectedValue(new Error("write"));
-    await expect(useSavedTripsStore.getState().addTrip(tripTwo)).resolves.toBeNull();
+    await expect(
+      useSavedTripsStore.getState().addTrip(tripTwo),
+    ).resolves.toBeNull();
     expect(useSavedTripsStore.getState().savedTrips).toEqual([tripOne]);
   });
 
@@ -204,7 +211,9 @@ describe("useSavedTripsStore integration", () => {
   test("clearTrips clears list and active trip", async () => {
     resetStore({ savedTrips: [tripOne], activeSavedTrip: tripOne });
     services.clearSavedTrips.mockResolvedValue(true);
-    await expect(useSavedTripsStore.getState().clearTrips()).resolves.toBe(true);
+    await expect(useSavedTripsStore.getState().clearTrips()).resolves.toBe(
+      true,
+    );
     expect(useSavedTripsStore.getState()).toMatchObject({
       savedTrips: [],
       activeSavedTrip: null,
@@ -215,7 +224,9 @@ describe("useSavedTripsStore integration", () => {
   test("failed clearing preserves list and active trip", async () => {
     resetStore({ savedTrips: [tripOne], activeSavedTrip: tripOne });
     services.clearSavedTrips.mockRejectedValue(new Error("clear"));
-    await expect(useSavedTripsStore.getState().clearTrips()).resolves.toBe(false);
+    await expect(useSavedTripsStore.getState().clearTrips()).resolves.toBe(
+      false,
+    );
     expect(useSavedTripsStore.getState()).toMatchObject({
       savedTrips: [tripOne],
       activeSavedTrip: tripOne,

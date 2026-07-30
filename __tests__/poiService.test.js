@@ -9,9 +9,7 @@ function createProvider({
     id,
     normalizeSelectedPoiTypes: jest.fn((value) => value),
     getProviderPoiTypes: jest.fn(() => [...types]),
-    prioritizeProviderPoiTypesForSearch: jest.fn(() => [
-      ...prioritizedTypes,
-    ]),
+    prioritizeProviderPoiTypesForSearch: jest.fn(() => [...prioritizedTypes]),
     getSearchRadiusForType: jest.fn(() => radius),
     fetchPoisForRoutePointAndType: jest.fn(implementation),
   };
@@ -91,18 +89,57 @@ describe("poiService orchestration", () => {
       ["first", "second", "third"],
       selectedPoiTypes,
     );
-    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(4);
+    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(6);
     expect(
       provider.fetchPoisForRoutePointAndType.mock.calls.map(
         ([request]) => request.providerType,
       ),
-    ).toEqual(["third", "first", "third", "first"]);
+    ).toEqual(["third", "first", "third", "first", "second", "second"]);
     expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledWith({
       point: routePoints[0],
       providerType: "third",
       radiusMeters: 6000,
       maxResultCount: 5,
     });
+  });
+
+  test("enforces the beta request-matrix cap across two providers", async () => {
+    const google = createProvider({
+      id: "google",
+      types: ["one", "two", "three", "four"],
+      prioritizedTypes: ["one", "two", "three", "four"],
+    });
+    const tomtom = createProvider({
+      id: "tomtom",
+      types: ["one", "two", "three", "four"],
+      prioritizedTypes: ["one", "two", "three", "four"],
+    });
+    const { subject } = loadSubject([google, tomtom]);
+
+    await subject.fetchPoisNearRoutePoints({ routePoints, numStops: 3 });
+
+    expect(google.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(13);
+    expect(tomtom.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(13);
+  });
+
+  test("limits concurrent POI requests", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const provider = createProvider({
+      types: ["one", "two"],
+      implementation: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return [];
+      },
+    });
+    const { subject } = loadSubject([provider]);
+
+    await subject.fetchPoisNearRoutePoints({ routePoints, numStops: 3 });
+
+    expect(maximumActive).toBeLessThanOrEqual(4);
   });
 
   test("flattens fulfilled batches and tolerates exactly half of requests failing", async () => {
@@ -130,7 +167,7 @@ describe("poiService orchestration", () => {
     ).resolves.toEqual([keptPoi]);
   });
 
-  test("rejects when most or all provider requests fail", async () => {
+  test("preserves partial results even when most provider requests fail", async () => {
     const mostlyFailing = createProvider({
       implementation: jest
         .fn()
@@ -144,7 +181,7 @@ describe("poiService orchestration", () => {
         routePoints: routePoints.slice(0, 3),
         numStops: 1,
       }),
-    ).rejects.toThrow("Most POI provider requests failed");
+    ).resolves.toEqual([]);
 
     const allFailing = createProvider({
       implementation: async () => {
@@ -157,7 +194,7 @@ describe("poiService orchestration", () => {
         routePoints: routePoints.slice(0, 2),
         numStops: 1,
       }),
-    ).rejects.toThrow("All POI provider requests failed");
+    ).rejects.toThrow("All POI providers are temporarily unavailable");
   });
 
   test("deduplicates stable ids within a provider while keeping the first result", async () => {
@@ -213,7 +250,9 @@ describe("poiService orchestration", () => {
     const { subject } = loadSubject([tomtom, google]);
 
     await expect(
-      subject.fetchPoisNearRoutePoints({ routePoints: routePoints.slice(0, 1) }),
+      subject.fetchPoisNearRoutePoints({
+        routePoints: routePoints.slice(0, 1),
+      }),
     ).resolves.toEqual([googlePoi]);
   });
 
@@ -248,13 +287,17 @@ describe("poiService orchestration", () => {
     const { subject } = loadSubject([provider]);
 
     await expect(
-      subject.fetchPoisNearRoutePoints({ routePoints: routePoints.slice(0, 1) }),
+      subject.fetchPoisNearRoutePoints({
+        routePoints: routePoints.slice(0, 1),
+      }),
     ).resolves.toEqual(pois);
   });
 
   test("reports provider counts and does not mutate caller inputs", async () => {
     const selectedPoiTypes = ["cafes"];
-    const originalPoints = routePoints.slice(0, 2).map((point) => ({ ...point }));
+    const originalPoints = routePoints
+      .slice(0, 2)
+      .map((point) => ({ ...point }));
     const inputPoints = originalPoints.map((point) => ({ ...point }));
     const google = createProvider({
       id: "google",

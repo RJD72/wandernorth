@@ -29,9 +29,7 @@ describe("tomtomPoiProvider", () => {
 
   test("builds a GET request with the expected encoded type and query", async () => {
     const { fetchPoisForRoutePointAndType } = loadSubject();
-    fetch.mockResolvedValue(
-      makeResponse({ data: { results: [] } }),
-    );
+    fetch.mockResolvedValue(makeResponse({ data: { results: [] } }));
 
     await fetchPoisForRoutePointAndType({
       point: { latitude: 43.1, longitude: -81.2 },
@@ -50,7 +48,7 @@ describe("tomtomPoiProvider", () => {
     expect(parsedUrl.searchParams.get("radius")).toBe("3500");
     expect(parsedUrl.searchParams.get("limit")).toBe("4");
     expect(parsedUrl.searchParams.get("countrySet")).toBe("CA");
-    expect(options).toEqual({ method: "GET" });
+    expect(options.method).toBe("GET");
   });
 
   test("normalizes valid results and drops records without stable coordinates or ids", async () => {
@@ -145,7 +143,7 @@ describe("tomtomPoiProvider", () => {
         point: { latitude: 43, longitude: -81 },
         providerType: "cafe",
       }),
-    ).rejects.toThrow("status 429");
+    ).rejects.toMatchObject({ category: "quota", status: 429 });
 
     expect(
       usage

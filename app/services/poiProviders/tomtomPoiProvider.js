@@ -1,5 +1,5 @@
 import { logger } from "../../utils/logger";
-import { trackExternalRequest } from "../apiUsageTracker";
+import { requestExternalApi } from "../externalApiRequest";
 import {
   getCanonicalPoiCategoryId,
   getPoiCategoryIdForTomTomQuery,
@@ -165,8 +165,6 @@ function normalizeTomTomResult(result, fallbackCategory) {
     rating: null,
     userRatingCount: null,
     googleMapsUri: null,
-
-    raw: result,
   };
 }
 
@@ -197,11 +195,15 @@ export async function fetchPoisForRoutePointAndType({
     `${TOMTOM_POI_SEARCH_BASE_URL}/${encodedProviderType}.json?` +
     queryParams.toString();
 
-  const response = await trackExternalRequest("tomtom", "poi-search", () =>
-    fetch(url, {
+  const response = await requestExternalApi({
+    provider: "tomtom",
+    operation: "poi-search",
+    url,
+    options: {
       method: "GET",
-    }),
-  );
+    },
+    retryTransient: false,
+  });
 
   const responseText = await response.text();
   let data = {};
@@ -220,16 +222,6 @@ export async function fetchPoisForRoutePointAndType({
     resultCount: data.results?.length ?? 0,
     firstResult: data.results?.[0]?.poi?.name ?? null,
   });
-
-  if (!response.ok) {
-    logger.log("[poiService] TomTom POI error:", {
-      providerType,
-      status: response.status,
-    });
-    throw new Error(
-      `TomTom POI request failed with status ${response.status}.`,
-    );
-  }
 
   return (data.results || [])
     .map((result) => normalizeTomTomResult(result, providerType))

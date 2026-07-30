@@ -10,7 +10,7 @@ function response(data, { ok = true, status = 200 } = {}) {
 
 function loadSubject() {
   jest.resetModules();
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = FAKE_KEY;
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY = FAKE_KEY;
   process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME = "com.example.test";
   process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1 = "AA:BB:CC";
   global.fetch = jest.fn();
@@ -32,7 +32,7 @@ const request = {
 
 describe("Google POI provider contract", () => {
   afterEach(() => {
-    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    delete process.env.EXPO_PUBLIC_GOOGLE_WEB_SERVICES_API_KEY;
     delete process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
     delete process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
   });
@@ -103,7 +103,9 @@ describe("Google POI provider contract", () => {
     const { fetchPoisForRoutePointAndType } = loadSubject();
     fetch
       .mockResolvedValueOnce(response({ places: [] }))
-      .mockResolvedValueOnce(response({ places: [{ id: "missing-location" }] }));
+      .mockResolvedValueOnce(
+        response({ places: [{ id: "missing-location" }] }),
+      );
     await expect(fetchPoisForRoutePointAndType(request)).resolves.toEqual([]);
     await expect(fetchPoisForRoutePointAndType(request)).resolves.toEqual([]);
   });

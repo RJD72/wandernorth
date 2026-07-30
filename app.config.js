@@ -4,7 +4,7 @@
 module.exports = {
   expo: {
     // Human-readable app name shown on device home screens and stores.
-    name: "wandernorth_V3",
+    name: "Wander North",
 
     // URL-safe project identifier used by Expo services and build tooling.
     slug: "wandernorth_V3",
@@ -27,7 +27,7 @@ module.exports = {
 
     splash: {
       // Startup image displayed while native bundle initializes.
-      image: "./assets/splash-icon.png",
+      image: "./assets/images/splash.png",
 
       // "contain" preserves image aspect ratio without cropping.
       resizeMode: "contain",
@@ -39,17 +39,28 @@ module.exports = {
     ios: {
       // Allows optimized iPad/tablet support in addition to iPhone layouts.
       supportsTablet: true,
+      infoPlist: {
+        NSLocationWhenInUseUsageDescription:
+          "Wander North uses your location only when you choose Current Location to plan a route.",
+      },
     },
 
     android: {
       // Android application ID (reverse-domain format).
       // Changing this after publishing creates a new app identity in Play Store.
       package: "com.rob.wandernorth",
+      versionCode: 1,
+      allowBackup: false,
+      blockedPermissions: [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+      ],
 
       config: {
         // Google Maps API key for Android builds (read from environment variable).
         googleMaps: {
-          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY,
         },
       },
 
@@ -58,19 +69,13 @@ module.exports = {
         backgroundColor: "#E6F4FE",
 
         // Foreground layer for adaptive icon.
-        foregroundImage: "./assets/android-icon-foreground.png",
-
-        // Background layer image for adaptive icon.
-        backgroundImage: "./assets/android-icon-background.png",
-
-        // Monochrome icon used by Android themed icon systems.
-        monochromeImage: "./assets/android-icon-monochrome.png",
+        foregroundImage: "./assets/icon.png",
       },
     },
 
     web: {
       // Browser tab icon for web builds.
-      favicon: "./assets/favicon.png",
+      favicon: "./assets/icon.png",
 
       // Uses Metro as the web bundler for parity with native builds.
       bundler: "metro",
@@ -87,15 +92,16 @@ module.exports = {
       [
         "expo-location",
         {
-          // Permission shown when requesting background + foreground location.
-          locationAlwaysAndWhenInUsePermission:
-            "Allow $(PRODUCT_NAME) to access your location even when you are not using the app.",
-
           // Permission shown for foreground-only location access requests.
           locationWhenInUsePermission:
-            "Allow $(PRODUCT_NAME) to access your location while you are using the app.",
+            "Wander North uses your location only when you choose Current Location to plan a route.",
         },
       ],
     ],
+    extra: {
+      appEnvironment:
+        process.env.EXPO_PUBLIC_APP_ENV ||
+        (process.env.NODE_ENV === "development" ? "development" : "production"),
+    },
   },
 };

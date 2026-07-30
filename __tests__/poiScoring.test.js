@@ -25,7 +25,9 @@ describe("POI scoring and distribution", () => {
   });
 
   test("returns fewer candidates than requested without duplication", () => {
-    expect(chooseDistributedStops([poi("a", 0), poi("b", 1)], 4)).toHaveLength(2);
+    expect(chooseDistributedStops([poi("a", 0), poi("b", 1)], 4)).toHaveLength(
+      2,
+    );
   });
 
   test("returns the exact requested count when enough candidates exist", () => {

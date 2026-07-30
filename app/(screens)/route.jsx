@@ -7,7 +7,7 @@ import {
   Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import polyline from "@mapbox/polyline";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,7 +22,10 @@ import CollapsibleSection from "../components/CollapsibleSection";
 import DemoDataIndicator from "../components/DemoDataIndicator";
 
 import { buildRoute } from "../services/routeService";
-import { fetchPoisForRoute } from "../services/poiSearchService";
+import {
+  fetchPoisForRoute,
+  getLastPoiResultMetadata,
+} from "../services/poiSearchService";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
 import { useEntitlementStore } from "../store/useEntitlementStore";
@@ -44,6 +47,7 @@ import { isValidCoords } from "../utils/coordinates";
 import { getStopCoords, getStopId } from "../utils/stopUtils";
 import { MAX_DISTANCE_FROM_ROUTE_METERS } from "../utils/poiDistancePolicy";
 import { logger } from "../utils/logger";
+import { getExternalApiUserMessage } from "../services/externalApiRequest";
 
 const EMPTY_SELECTED_POI_TYPES = [];
 
@@ -116,6 +120,7 @@ function formatCategoryTitle(category) {
 }
 
 const Route = () => {
+  const finalRouteSubmissionInFlight = useRef(false);
   // Primary route request lifecycle state.
   // - loading controls the initial screen state while route data is being built.
   // - routeData stores the normalized route payload used by the map and summary card.
@@ -128,6 +133,7 @@ const Route = () => {
   // after a route is successfully available.
   const [poiLoading, setPoiLoading] = useState(false);
   const [poiError, setPoiError] = useState(null);
+  const [poiNotice, setPoiNotice] = useState(null);
   const [suggestedStops, setSuggestedStops] = useState([]);
   const [allRoutePois, setAllRoutePois] = useState([]);
 
@@ -160,8 +166,7 @@ const Route = () => {
   } = useSavedTripsStore();
   const requestedSavedTripMode = mode === "savedTrip";
   const isSavedTripMode = Boolean(
-    requestedSavedTripMode &&
-      activeSavedTrip?.id === normalizedSavedTripId,
+    requestedSavedTripMode && activeSavedTrip?.id === normalizedSavedTripId,
   );
   const isLegacySavedTransitTrip = Boolean(
     isSavedTripMode && activeSavedTrip?.routeRequest?.travelMode === "transit",
@@ -249,9 +254,21 @@ const Route = () => {
     });
 
     try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert(
+          "Google Maps unavailable",
+          "This route could not be opened on this device.",
+        );
+        return;
+      }
       await Linking.openURL(url);
     } catch (error) {
       logger.log("Open Google Maps error:", error);
+      Alert.alert(
+        "Google Maps unavailable",
+        "This route could not be opened. Please try again.",
+      );
     }
   }
 
@@ -515,9 +532,17 @@ const Route = () => {
         }
 
         // Build a single params object to keep service calls explicit and easy to log/debug.
-        const parsedParams = { ...routeRequest };
+        const { prefetchedRoute, ...requestWithoutPrefetch } = routeRequest;
+        const parsedParams = {
+          ...requestWithoutPrefetch,
+          purpose: "preview",
+        };
 
-        const result = await buildRoute(parsedParams);
+        const result =
+          routeRequest.source === "explore" &&
+          typeof prefetchedRoute?.encodedPolyline === "string"
+            ? prefetchedRoute
+            : await buildRoute(parsedParams);
 
         if (!isCurrent) return;
 
@@ -542,7 +567,7 @@ const Route = () => {
         setError(
           requestedSavedTripMode
             ? "Unable to reopen this saved trip. The saved route data is incomplete."
-            : "Failed to build route. Please try again.",
+            : getExternalApiUserMessage(error),
         );
       } finally {
         if (isCurrent) {
@@ -591,6 +616,7 @@ const Route = () => {
       try {
         setPoiLoading(true);
         setPoiError(null);
+        setPoiNotice(null);
         setSuggestedStops([]);
         setAllRoutePois([]);
 
@@ -604,6 +630,25 @@ const Route = () => {
           selectedPoiTypes, // Array of user-selected POI categories (e.g., ["restaurant", "park"]) that will be mapped to Google Place types within the service.
           numStops, // The desired number of stops, which can be used by the service to prioritize or limit results. This value is passed as-is and can be a number or numeric string; the service should handle coercion and validation.
         });
+        const searchMetadata = getLastPoiResultMetadata();
+        if (searchMetadata?.partial) {
+          setPoiNotice(
+            "Some place providers were unavailable, so these results may be limited.",
+          );
+        } else if (
+          Array.isArray(selectedPoiTypes) &&
+          selectedPoiTypes.length >
+            Math.max(
+              0,
+              ...Object.values(
+                searchMetadata?.searchedTypesByProvider || {},
+              ).map((types) => types.length),
+            )
+        ) {
+          setPoiNotice(
+            "To control beta API use, the selected categories were prioritized in a bounded search.",
+          );
+        }
 
         if (!isCurrent) return;
 
@@ -689,6 +734,8 @@ const Route = () => {
   }, [requestedSavedTripMode, routeData, selectedPoiTypes, numStops]);
 
   async function handleBuildFinalRoute() {
+    if (finalRouteSubmissionInFlight.current) return;
+
     clearSaveTripStatus();
 
     if (isLegacySavedTransitTrip) {
@@ -734,6 +781,7 @@ const Route = () => {
     }
 
     try {
+      finalRouteSubmissionInFlight.current = true;
       setFinalRouteLoading(true);
       setFinalRouteError(null);
 
@@ -746,6 +794,7 @@ const Route = () => {
         selectedPoiTypes: routeData.parsedParams.selectedPoiTypes,
         numStops: selectedStops.length,
         waypoints: waypointCoords,
+        purpose: "final",
       });
 
       const routeCoords = polyline
@@ -762,8 +811,9 @@ const Route = () => {
       });
     } catch (error) {
       logger.log("Final route build error:", error);
-      setFinalRouteError("Failed to build final route with selected stops.");
+      setFinalRouteError(getExternalApiUserMessage(error));
     } finally {
+      finalRouteSubmissionInFlight.current = false;
       setFinalRouteLoading(false);
     }
   }
@@ -884,10 +934,6 @@ const Route = () => {
         radiusMeters: 50000,
       }
     : null;
-  const customStopSearchPoints = routeData?.routeCoords?.length
-    ? getSamplePointsAlongRoute(routeData.routeCoords)
-    : [];
-
   // Render branch 1: full-page loader while initial route call runs.
   if (loading) {
     return (
@@ -1060,7 +1106,6 @@ const Route = () => {
           <AddCustomStopCard
             onAddStop={handleAddCustomStop}
             locationBias={customStopLocationBias}
-            customSearchPoints={customStopSearchPoints}
           />
         </CollapsibleSection>
 
@@ -1093,6 +1138,7 @@ const Route = () => {
                 allSelectedMessage="All top suggestions have been selected"
                 poiLoading={poiLoading}
                 poiError={poiError}
+                poiNotice={poiNotice}
                 suggestedStops={visibleSuggestedStops}
                 totalSuggestedStopCount={suggestedStops.length}
                 selectedStops={selectedStops}
@@ -1161,8 +1207,8 @@ const Route = () => {
                   finalRouteLoading
                     ? "Building Final Route..."
                     : finalRouteData
-                    ? "Rebuild Final Route"
-                    : "Build Final Route"
+                      ? "Rebuild Final Route"
+                      : "Build Final Route"
                 }
                 onPress={handleBuildFinalRoute}
                 disabled={finalRouteLoading}
@@ -1198,8 +1244,8 @@ const Route = () => {
                     ? "Updating Trip..."
                     : "Saving Trip..."
                   : isSavedTripMode
-                  ? "Update Saved Trip"
-                  : "Save Trip"
+                    ? "Update Saved Trip"
+                    : "Save Trip"
               }
               onPress={handleSaveTrip}
               disabled={

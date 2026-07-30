@@ -34,9 +34,15 @@ describe("featureAccess", () => {
   });
 
   test("Explore and Saved Trips are gated by tier", () => {
-    expect(canUseFeature(SUBSCRIPTION_TIERS.FREE, FEATURES.EXPLORE)).toBe(false);
-    expect(canUseFeature(SUBSCRIPTION_TIERS.PREMIUM, FEATURES.EXPLORE)).toBe(true);
-    expect(canUseFeature(SUBSCRIPTION_TIERS.FREE, FEATURES.SAVE_TRIPS)).toBe(false);
+    expect(canUseFeature(SUBSCRIPTION_TIERS.FREE, FEATURES.EXPLORE)).toBe(
+      false,
+    );
+    expect(canUseFeature(SUBSCRIPTION_TIERS.PREMIUM, FEATURES.EXPLORE)).toBe(
+      true,
+    );
+    expect(canUseFeature(SUBSCRIPTION_TIERS.FREE, FEATURES.SAVE_TRIPS)).toBe(
+      false,
+    );
     expect(canUseFeature(SUBSCRIPTION_TIERS.PREMIUM, FEATURES.SAVE_TRIPS)).toBe(
       true,
     );

@@ -1,30 +1,11 @@
-import { trackExternalRequest } from "./apiUsageTracker";
+import { requestExternalApi } from "./externalApiRequest";
+import {
+  getGoogleAndroidRestrictionHeaders,
+  getGoogleWebServicesApiKey,
+} from "../config/providerConfig";
+import { placeDetailsRequestCache } from "./apiRequestCaches";
 
 const GOOGLE_PLACES_BASE_URL = "https://places.googleapis.com/v1";
-
-function getAndroidRestrictionHeaders() {
-  const androidPackageName = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
-  const androidCertSha1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
-
-  if (!androidPackageName || !androidCertSha1) {
-    return {};
-  }
-
-  return {
-    "X-Android-Package": androidPackageName,
-    "X-Android-Cert": androidCertSha1,
-  };
-}
-
-function getGoogleApiKey() {
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY.");
-  }
-
-  return apiKey;
-}
 
 function getGooglePlaceId(stop) {
   if (!stop) return null;
@@ -42,7 +23,7 @@ function getGooglePlaceId(stop) {
 function buildPhotoUrl(photoName, maxWidthPx = 900) {
   if (!photoName) return null;
 
-  const apiKey = getGoogleApiKey();
+  const apiKey = getGoogleWebServicesApiKey();
 
   return `${GOOGLE_PLACES_BASE_URL}/${photoName}/media?maxWidthPx=${maxWidthPx}&key=${apiKey}`;
 }
@@ -64,45 +45,42 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
     };
   }
 
-  const apiKey = getGoogleApiKey();
-
-  const response = await trackExternalRequest("google", "place-details", () =>
-    fetch(`${GOOGLE_PLACES_BASE_URL}/places/${placeId}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": apiKey,
-        ...getAndroidRestrictionHeaders(),
-        "X-Goog-FieldMask":
-          "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
+  return placeDetailsRequestCache.load(placeId, async () => {
+    const response = await requestExternalApi({
+      provider: "google",
+      operation: "place-details-rich",
+      url: `${GOOGLE_PLACES_BASE_URL}/places/${encodeURIComponent(placeId)}`,
+      options: {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": getGoogleWebServicesApiKey(),
+          ...getGoogleAndroidRestrictionHeaders(),
+          "X-Goog-FieldMask":
+            "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
+        },
       },
-    }),
-  );
+      retryTransient: true,
+    });
 
-  if (!response.ok) {
-    throw new Error(
-      `Google Place Details failed with status ${response.status}.`,
-    );
-  }
+    const data = await response.json();
 
-  const data = await response.json();
+    const imageUrls =
+      data.photos
+        ?.slice(0, 1)
+        .map((photo) => buildPhotoUrl(photo.name))
+        .filter(Boolean) ?? [];
 
-  const imageUrls =
-    data.photos
-      ?.slice(0, 5)
-      .map((photo) => buildPhotoUrl(photo.name))
-      .filter(Boolean) ?? [];
-
-  return {
-    googlePlaceId: data.id ?? placeId,
-    title: data.displayName?.text ?? null,
-    address: data.formattedAddress ?? null,
-    imageUrls,
-    description: data.editorialSummary?.text ?? null,
-    rating: data.rating ?? null,
-    userRatingCount: data.userRatingCount ?? null,
-    googleMapsUri: data.googleMapsUri ?? null,
-    source: "google-place-details",
-    raw: data,
-  };
+    return {
+      googlePlaceId: data.id ?? placeId,
+      title: data.displayName?.text ?? null,
+      address: data.formattedAddress ?? null,
+      imageUrls,
+      description: data.editorialSummary?.text ?? null,
+      rating: data.rating ?? null,
+      userRatingCount: data.userRatingCount ?? null,
+      googleMapsUri: data.googleMapsUri ?? null,
+      source: "google-place-details",
+    };
+  });
 }

@@ -238,7 +238,9 @@ describe("savedTripsService", () => {
   });
 
   test("invalid save payloads are rejected at the service boundary", async () => {
-    await expect(service.saveTrip({ title: "Incomplete" })).rejects.toMatchObject({
+    await expect(
+      service.saveTrip({ title: "Incomplete" }),
+    ).rejects.toMatchObject({
       code: "invalid-trip-payload",
     });
   });

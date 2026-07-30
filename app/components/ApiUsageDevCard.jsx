@@ -6,6 +6,7 @@ import {
   resetApiUsage,
   subscribeToApiUsage,
 } from "../services/apiUsageTracker";
+import { allowDeveloperControls } from "../config/buildConfig";
 
 export default function ApiUsageDevCard() {
   const [expanded, setExpanded] = useState(false);
@@ -14,7 +15,7 @@ export default function ApiUsageDevCard() {
     () => subscribeToApiUsage(() => setRows(getApiUsageSnapshot())),
     [],
   );
-  if (!__DEV__) return null;
+  if (!allowDeveloperControls) return null;
   return (
     <View className="mt-4 rounded-2xl border border-white/20 bg-black/20 p-4">
       <Pressable onPress={() => setExpanded((value) => !value)}>

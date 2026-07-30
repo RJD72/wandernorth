@@ -14,11 +14,41 @@
 import { logger } from "../utils/logger";
 import { activePoiProviders, primaryPoiProvider } from "./poiProviders";
 import { getDistanceMeters } from "../utils/routeDistance";
+import { API_LIMITS } from "../config/apiLimits";
 
-// Todo: These temporary limits are for development safety. Remove them later when you have confidence in the service's behavior and performance.
-const MAX_ROUTE_POINTS_TO_SEARCH = 5;
-const MAX_POI_TYPES_TO_SEARCH = 3;
 const CROSS_PROVIDER_DUPLICATE_DISTANCE_METERS = 75;
+let lastPoiSearchMetadata = null;
+
+export function getLastPoiSearchMetadata() {
+  return lastPoiSearchMetadata ? { ...lastPoiSearchMetadata } : null;
+}
+
+export async function runWithConcurrency(
+  tasks,
+  limit = API_LIMITS.poiMaximumConcurrency,
+) {
+  const results = new Array(tasks.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < tasks.length) {
+      const taskIndex = nextIndex;
+      nextIndex += 1;
+      try {
+        results[taskIndex] = {
+          status: "fulfilled",
+          value: await tasks[taskIndex](),
+        };
+      } catch (reason) {
+        results[taskIndex] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  const workerCount = Math.min(Math.max(1, limit), tasks.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
 
 export function normalizeSelectedPoiTypes(selectedPoiTypes = []) {
   return primaryPoiProvider.normalizeSelectedPoiTypes(selectedPoiTypes);
@@ -252,11 +282,13 @@ export async function fetchPoisNearRoutePoints({
 
   const pointsToSearch = getEvenlySpacedRoutePoints(
     routePoints,
-    MAX_ROUTE_POINTS_TO_SEARCH,
+    API_LIMITS.poiMaximumRoutePoints,
   );
 
-  // Build all request promises first so they can execute in parallel.
-  const requests = [];
+  const firstWaveTasks = [];
+  const fallbackWaveTasks = [];
+  const searchedTypesByProvider = {};
+  const fallbackTypesByProvider = {};
 
   for (const provider of activePoiProviders) {
     const providerTypes = provider.getProviderPoiTypes(selectedPoiTypes);
@@ -274,22 +306,42 @@ export async function fetchPoisNearRoutePoints({
         providerTypes,
         selectedPoiTypes,
       );
-    const typesToSearch = prioritizedProviderTypes.slice(
+    const firstWaveTypes = prioritizedProviderTypes.slice(
       0,
-      MAX_POI_TYPES_TO_SEARCH,
+      API_LIMITS.poiFirstWaveTypesPerProvider,
     );
+    const fallbackTypes = prioritizedProviderTypes.slice(
+      API_LIMITS.poiFirstWaveTypesPerProvider,
+      API_LIMITS.poiFirstWaveTypesPerProvider +
+        API_LIMITS.poiFallbackTypesPerProvider,
+    );
+    searchedTypesByProvider[provider.id] = [...firstWaveTypes];
+    fallbackTypesByProvider[provider.id] = [...fallbackTypes];
 
     logger.log("[poiService] Provider search:", {
       provider: provider.id,
       incomingRoutePointCount: routePoints.length,
       searchedRoutePointCount: pointsToSearch.length,
-      typesToSearch,
-      requestCount: pointsToSearch.length * typesToSearch.length,
+      typesToSearch: firstWaveTypes,
+      requestCount: pointsToSearch.length * firstWaveTypes.length,
     });
 
     for (const point of pointsToSearch) {
-      for (const providerType of typesToSearch) {
-        requests.push(
+      for (const providerType of firstWaveTypes) {
+        firstWaveTasks.push(() =>
+          provider.fetchPoisForRoutePointAndType({
+            point,
+            providerType,
+            radiusMeters: provider.getSearchRadiusForType(providerType),
+            maxResultCount: 5,
+          }),
+        );
+      }
+    }
+
+    for (const point of pointsToSearch.slice(0, 3)) {
+      for (const providerType of fallbackTypes) {
+        fallbackWaveTasks.push(() =>
           provider.fetchPoisForRoutePointAndType({
             point,
             providerType,
@@ -301,20 +353,34 @@ export async function fetchPoisNearRoutePoints({
     }
   }
 
-  const settledResults = await Promise.allSettled(requests);
+  const firstWaveResults = await runWithConcurrency(firstWaveTasks);
+  const firstWavePois = firstWaveResults.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+  const firstWaveCandidateCount = dedupeLikelySamePlacesAcrossProviders(
+    dedupePois(firstWavePois),
+  ).length;
+  const browseBuffer = 2;
+  const shouldRunFallback =
+    fallbackWaveTasks.length > 0 &&
+    firstWaveCandidateCount < safeNumStops + browseBuffer;
+  const fallbackWaveResults = shouldRunFallback
+    ? await runWithConcurrency(fallbackWaveTasks)
+    : [];
+  if (shouldRunFallback) {
+    Object.entries(fallbackTypesByProvider).forEach(
+      ([providerId, fallbackTypes]) => {
+        searchedTypesByProvider[providerId].push(...fallbackTypes);
+      },
+    );
+  }
+  const settledResults = [...firstWaveResults, ...fallbackWaveResults];
 
   if (
     settledResults.length > 0 &&
-    settledResults.every((result) => result.status === "rejected")
+    !settledResults.some((result) => result.status === "fulfilled")
   ) {
-    throw new Error("All POI provider requests failed.");
-  }
-
-  const failedRequestCount = settledResults.filter(
-    (result) => result.status === "rejected",
-  ).length;
-  if (failedRequestCount > settledResults.length / 2) {
-    throw new Error("Most POI provider requests failed.");
+    throw new Error("All POI providers are temporarily unavailable.");
   }
 
   // Keep successful batches; log and ignore failures to preserve resilience.
@@ -332,11 +398,24 @@ export async function fetchPoisNearRoutePoints({
     providerIdDedupedPois,
   );
 
+  lastPoiSearchMetadata = {
+    routePointCount: pointsToSearch.length,
+    searchedTypesByProvider,
+    firstWaveRequestCount: firstWaveTasks.length,
+    fallbackWaveRequestCount: fallbackWaveResults.length,
+    fallbackUsed: shouldRunFallback,
+    failedRequestCount: settledResults.filter(
+      (result) => result.status === "rejected",
+    ).length,
+    partial: settledResults.some((result) => result.status === "rejected"),
+  };
+
   logger.log("[poiService] Provider result counts:", {
     ...getProviderResultCounts(allPois),
     totalBeforeDedupe: allPois.length,
     totalAfterProviderIdDedupe: providerIdDedupedPois.length,
     totalAfterCrossProviderDedupe: crossProviderDedupedPois.length,
+    searchMetadata: lastPoiSearchMetadata,
   });
 
   /**

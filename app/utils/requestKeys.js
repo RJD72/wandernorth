@@ -8,12 +8,16 @@ export function createRouteRequestKey({
   destinationCoords,
   travelMode,
   waypoints = [],
+  purpose = "preview",
+  routingPreference = "basic",
 }) {
   return [
     coordinate(startingCoords),
     coordinate(destinationCoords),
     travelMode || "driving",
     waypoints.map(coordinate).join(";"),
+    purpose,
+    routingPreference,
   ].join("|");
 }
 export function createPoiRequestKey({

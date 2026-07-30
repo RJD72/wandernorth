@@ -1,9 +1,4 @@
-import {
-  ActivityIndicator,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 export default function CurrentLocationToggle({
@@ -14,9 +9,7 @@ export default function CurrentLocationToggle({
   return (
     <View className="mb-2 flex-row items-center justify-between px-2">
       <Text className="text-text-primary">
-        {useCurrentLocation
-          ? "Using current location"
-          : "Use current location"}
+        {useCurrentLocation ? "Using current location" : "Use current location"}
       </Text>
 
       <Pressable

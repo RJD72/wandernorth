@@ -11,63 +11,12 @@ import WNInput from "./WNInput";
 import { logger } from "../utils/logger";
 import { isDemoModeEnabled } from "../config/demoMode";
 import { searchPlacesLocally } from "../services/placeSearchService";
-import { trackExternalRequest } from "../services/apiUsageTracker";
-
-const MAX_CUSTOM_TEXT_SEARCH_POINTS = 5;
-const CUSTOM_TEXT_SEARCH_RADIUS_METERS = 12000;
-
-function getAndroidRestrictionHeaders() {
-  const androidPackageName = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
-  const androidCertSha1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
-
-  if (!androidPackageName || !androidCertSha1) {
-    return {};
-  }
-
-  return {
-    "X-Android-Package": androidPackageName,
-    "X-Android-Cert": androidCertSha1,
-  };
-}
-
-function isValidSearchPoint(point) {
-  return (
-    point &&
-    typeof point.latitude === "number" &&
-    typeof point.longitude === "number" &&
-    Number.isFinite(point.latitude) &&
-    Number.isFinite(point.longitude)
-  );
-}
-
-function normalizeTextSearchPlace(place) {
-  const title = place?.displayName?.text;
-  const address = place?.formattedAddress || "";
-
-  if (!place?.id || !title) return null;
-
-  return {
-    place_id: place.id,
-    title,
-    name: title,
-    address,
-    description: address ? `${title} · ${place.formattedAddress}` : title,
-    source: "text-search",
-  };
-}
-
-function mergePredictions(...predictionGroups) {
-  const seenPlaceIds = new Set();
-
-  return predictionGroups.flat().filter((prediction) => {
-    if (!prediction?.place_id || seenPlaceIds.has(prediction.place_id)) {
-      return false;
-    }
-
-    seenPlaceIds.add(prediction.place_id);
-    return true;
-  });
-}
+import {
+  createAutocompleteSessionToken,
+  fetchAutocompletePredictions,
+  fetchPlaceDetailsNew,
+} from "../services/googlePlacesAutocomplete";
+import { API_LIMITS } from "../config/apiLimits";
 
 function getPredictionName(prediction) {
   return (
@@ -76,62 +25,6 @@ function getPredictionName(prediction) {
     prediction?.title ||
     prediction?.description ||
     ""
-  );
-}
-
-async function fetchRouteTextSearchPredictions({
-  inputText,
-  searchPoints,
-  apiKey,
-}) {
-  const routeSearchPoints = searchPoints
-    .filter(isValidSearchPoint)
-    .slice(0, MAX_CUSTOM_TEXT_SEARCH_POINTS);
-
-  const searchResults = await Promise.allSettled(
-    routeSearchPoints.map(async (point) => {
-      const response = await trackExternalRequest(
-        "google",
-        "places-text-search",
-        () =>
-          fetch("https://places.googleapis.com/v1/places:searchText", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Goog-Api-Key": apiKey,
-              ...getAndroidRestrictionHeaders(),
-              "X-Goog-FieldMask":
-                "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType",
-            },
-            body: JSON.stringify({
-              textQuery: inputText,
-              locationBias: {
-                circle: {
-                  center: {
-                    latitude: point.latitude,
-                    longitude: point.longitude,
-                  },
-                  radius: CUSTOM_TEXT_SEARCH_RADIUS_METERS,
-                },
-              },
-              regionCode: "CA",
-              maxResultCount: 5,
-            }),
-          }),
-      );
-
-      if (!response.ok) {
-        throw new Error(`Places Text Search failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      return (data.places ?? []).map(normalizeTextSearchPlace).filter(Boolean);
-    }),
-  );
-
-  return searchResults.flatMap((result) =>
-    result.status === "fulfilled" ? result.value : [],
   );
 }
 
@@ -151,11 +44,9 @@ export default function AutocompleteInput({
   editable = true,
   rightElement = null,
   onDropdownVisibleChange = () => {}, // Callback to notify parent when dropdown visibility changes
-  autocompleteTypes = "geocode",
   locationBias = null,
   strictBounds = false,
   dropdownMode = "absolute",
-  customSearchPoints = [],
 }) {
   // ============ STATE MANAGEMENT ============
 
@@ -176,12 +67,13 @@ export default function AutocompleteInput({
 
   // ============ CONFIGURATION ============
 
-  // Retrieve Google Maps API key from environment config
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
   // Reference to the TextInput inside WNInput for focus/blur control
   const inputRef = useRef(null);
   const latestPredictionRequestId = useRef(0);
+  const sessionTokenRef = useRef(null);
+  const predictionAbortControllerRef = useRef(null);
+  const detailsAbortControllerRef = useRef(null);
+  const selectionInProgressRef = useRef(false);
 
   // ============ EFFECTS ============
   useEffect(() => {
@@ -196,6 +88,15 @@ export default function AutocompleteInput({
     setInput(value || ""); // Value is a prop from parent, so we update local state whenever it changes. This allows the parent to programmatically set the input value (e.g. clearing it after selection) and ensures our component reflects that change. We also default to an empty string if value is undefined to avoid uncontrolled input issues.
   }, [value]);
 
+  useEffect(
+    () => () => {
+      predictionAbortControllerRef.current?.abort();
+      detailsAbortControllerRef.current?.abort();
+      sessionTokenRef.current = null;
+    },
+    [],
+  );
+
   /**
    * Debounced prediction fetching on input change
    * Only fetches predictions while user is typing and input is 2+ characters
@@ -209,8 +110,10 @@ export default function AutocompleteInput({
 
     // Clear predictions if input is too short
     // Don't waste API calls on very short input that won't yield useful results
-    if (!input || input.length < 2) {
+    if (!input || input.trim().length < API_LIMITS.autocompleteMinimumLength) {
       latestPredictionRequestId.current += 1;
+      predictionAbortControllerRef.current?.abort();
+      sessionTokenRef.current = null;
       setPredictions([]);
       setShowList(false);
       setLoading(false);
@@ -221,7 +124,7 @@ export default function AutocompleteInput({
     // This allows users to type without triggering an API call on every keystroke and wasting API quota
     const timer = setTimeout(() => {
       fetchPredictions(input);
-    }, 300);
+    }, API_LIMITS.autocompleteDebounceMs);
 
     // Cleanup previous timer if input changes before timeout completes
     return () => clearTimeout(timer);
@@ -239,6 +142,9 @@ export default function AutocompleteInput({
   const fetchPredictions = async (inputText) => {
     const requestId = latestPredictionRequestId.current + 1;
     latestPredictionRequestId.current = requestId;
+    predictionAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    predictionAbortControllerRef.current = abortController;
 
     try {
       setLoading(true);
@@ -258,73 +164,21 @@ export default function AutocompleteInput({
         return;
       }
 
-      // Build URL with encoded input and API filters
-      let url =
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
-        `input=${encodeURIComponent(inputText)}` + // Takes user input & makes it safe for URL (e.g. spaces become %20)
-        `&components=country:ca`; // Restrict results to Canadian locations
-
-      if (typeof autocompleteTypes === "string" && autocompleteTypes.trim()) {
-        url += `&types=${encodeURIComponent(autocompleteTypes.trim())}`;
-      }
-
-      if (locationBias) {
-        url +=
-          `&location=${locationBias.latitude},${locationBias.longitude}` +
-          `&radius=${locationBias.radiusMeters}`;
-
-        if (strictBounds) {
-          url += `&strictbounds=true`;
-        }
-      }
-
-      url += `&key=${apiKey}`;
-
-      const res = await trackExternalRequest(
-        "google",
-        "places-autocomplete",
-        () =>
-          fetch(url, {
-            headers: {
-              ...getAndroidRestrictionHeaders(),
-            },
-          }),
-      );
-      const data = await res.json();
+      sessionTokenRef.current ??= createAutocompleteSessionToken();
+      const autocompletePredictions = await fetchAutocompletePredictions({
+        inputText,
+        sessionToken: sessionTokenRef.current,
+        locationBias,
+        strictBounds,
+        signal: abortController.signal,
+      });
 
       if (latestPredictionRequestId.current !== requestId) {
         return;
       }
 
-      const autocompletePredictions =
-        data.status === "OK" && data.predictions?.length > 0
-          ? data.predictions
-          : [];
-
-      const shouldRunRouteTextSearch =
-        inputText.length >= 2 &&
-        customSearchPoints.length > 0 &&
-        (dropdownMode === "inline" || autocompleteTypes === null);
-
-      const textSearchPredictions = shouldRunRouteTextSearch
-        ? await fetchRouteTextSearchPredictions({
-            inputText,
-            searchPoints: customSearchPoints,
-            apiKey,
-          })
-        : [];
-
-      if (latestPredictionRequestId.current !== requestId) {
-        return;
-      }
-
-      const mergedPredictions = mergePredictions(
-        textSearchPredictions,
-        autocompletePredictions,
-      );
-
-      if (mergedPredictions.length > 0) {
-        setPredictions(mergedPredictions);
+      if (autocompletePredictions.length > 0) {
+        setPredictions(autocompletePredictions);
         setShowList(true);
       } else {
         setPredictions([]);
@@ -335,7 +189,9 @@ export default function AutocompleteInput({
         return;
       }
 
-      logger.log("Autocomplete error:", err);
+      if (err?.name !== "AbortError") {
+        logger.log("Autocomplete error:", err);
+      }
       setPredictions([]);
       setShowList(false);
     } finally {
@@ -353,40 +209,26 @@ export default function AutocompleteInput({
    * @param {string} placeId - The Google Place ID from the prediction
    * @returns {Object|null} Object with address and coordinates, or null on error
    */
-  const fetchPlaceDetails = async (placeId, fallbackName = "") => {
+  const fetchPlaceDetails = async (
+    placeId,
+    fallbackName = "",
+    sessionToken,
+    signal,
+  ) => {
     try {
       if (isDemoModeEnabled) {
         return null;
       }
-      const url =
-        `https://maps.googleapis.com/maps/api/place/details/json?` +
-        `place_id=${placeId}` +
-        `&fields=name,formatted_address,geometry` +
-        `&key=${apiKey}`;
-
-      const res = await trackExternalRequest("google", "place-details", () =>
-        fetch(url, {
-          headers: {
-            ...getAndroidRestrictionHeaders(),
-          },
-        }),
-      );
-      const data = await res.json();
-
-      // Extract and format the location data
-      if (data.status === "OK") {
-        // Return formatted address and coordinates in a consistent format for parent component
-        return {
-          name: data.result.name || fallbackName,
-          address: data.result.formatted_address,
-          coords: {
-            latitude: data.result.geometry.location.lat,
-            longitude: data.result.geometry.location.lng,
-          },
-        };
-      }
+      return await fetchPlaceDetailsNew({
+        placeId,
+        fallbackName,
+        sessionToken,
+        signal,
+      });
     } catch (err) {
-      logger.log("Place details error:", err);
+      if (err?.name !== "AbortError") {
+        logger.log("Place details error:", err);
+      }
     }
 
     return null;
@@ -402,7 +244,15 @@ export default function AutocompleteInput({
    * @param {Object} prediction - The selected prediction object
    */
   const handleSelect = async (prediction) => {
-    latestPredictionRequestId.current += 1;
+    const selectionRequestId = latestPredictionRequestId.current + 1;
+    latestPredictionRequestId.current = selectionRequestId;
+    selectionInProgressRef.current = true;
+    predictionAbortControllerRef.current?.abort();
+    detailsAbortControllerRef.current?.abort();
+    const detailsAbortController = new AbortController();
+    detailsAbortControllerRef.current = detailsAbortController;
+    const selectionSessionToken = sessionTokenRef.current;
+    sessionTokenRef.current = null;
 
     // Stop treating input as "typing" to prevent dropdown reopening
     setIsTyping(false);
@@ -420,26 +270,37 @@ export default function AutocompleteInput({
     setInput(prediction.description);
     onChangeText(prediction.description);
 
-    // Fetch full place details to get coordinates
-    const predictionName = getPredictionName(prediction);
-    const details = prediction.coords
-      ? {
-          name: predictionName,
-          address: prediction.address,
-          coords: prediction.coords,
-        }
-      : await fetchPlaceDetails(prediction.place_id, predictionName);
+    try {
+      // Fetch full place details to get coordinates
+      const predictionName = getPredictionName(prediction);
+      const details = prediction.coords
+        ? {
+            name: predictionName,
+            address: prediction.address,
+            coords: prediction.coords,
+          }
+        : await fetchPlaceDetails(
+            prediction.place_id,
+            predictionName,
+            selectionSessionToken,
+            detailsAbortController.signal,
+          );
 
-    // Update with formatted address and notify parent via callback
-    if (details) {
-      setInput(details.address);
-      onChangeText(details.address);
-      onSelectLocation(details.address, details.coords, {
-        name: details.name,
-        address: details.address,
-        placeId: prediction.place_id,
-        prediction,
-      });
+      if (latestPredictionRequestId.current !== selectionRequestId) return;
+
+      // Update with formatted address and notify parent via callback
+      if (details) {
+        setInput(details.address);
+        onChangeText(details.address);
+        onSelectLocation(details.address, details.coords, {
+          name: details.name,
+          address: details.address,
+          placeId: prediction.place_id,
+          prediction,
+        });
+      }
+    } finally {
+      selectionInProgressRef.current = false;
     }
   };
 
@@ -451,6 +312,11 @@ export default function AutocompleteInput({
    * @param {string} text - The new input text
    */
   const handleInputChange = (text) => {
+    latestPredictionRequestId.current += 1;
+    detailsAbortControllerRef.current?.abort();
+    if (!isDemoModeEnabled && !sessionTokenRef.current) {
+      sessionTokenRef.current = createAutocompleteSessionToken();
+    }
     setIsTyping(true); // Mark as typing to enable debounced fetching in useEffect - state is used to control when we want to fetch predictions based on user activity
     setInput(text); // Update local input state immediately for responsive UI -state is used to control the value of the input field
     onChangeText(text); // Notify parent of input change for controlled component behavior - prop callback allows parent to sync with input changes (e.g. for form state management)
@@ -461,7 +327,20 @@ export default function AutocompleteInput({
    * Empty handler: dropdown only reopens on typing, not on refocus
    * Mental Model: We want to control when the dropdown suggestions list appears. It should only appear when the user is actively typing and has entered enough characters, not just when they focus the input. By leaving this handler empty, we prevent the dropdown from reopening when the user taps back into the input after making a selection or when they focus it without typing. This allows for a cleaner user experience where the dropdown only shows relevant suggestions based on user input activity.
    */
-  const handleInputFocus = () => {};
+  const handleInputFocus = () => {
+    if (!isDemoModeEnabled && !sessionTokenRef.current) {
+      sessionTokenRef.current = createAutocompleteSessionToken();
+    }
+  };
+
+  const handleInputBlur = () => {
+    setTimeout(() => {
+      if (!selectionInProgressRef.current) {
+        predictionAbortControllerRef.current?.abort();
+        sessionTokenRef.current = null;
+      }
+    }, 0);
+  };
 
   // ============ RENDER ============
 
@@ -474,6 +353,7 @@ export default function AutocompleteInput({
         value={input}
         onChangeText={handleInputChange}
         onFocus={handleInputFocus}
+        onBlur={handleInputBlur}
         placeholder={placeholder}
         editable={editable}
         rightElement={rightElement}

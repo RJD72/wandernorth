@@ -83,9 +83,7 @@ export default function POITypeSelector({
     const isAlreadySelected = selectedPoiTypes.includes(id);
 
     if (isAlreadySelected) {
-      onChange(
-        selectedPoiTypes.filter((selectedId) => selectedId !== id),
-      );
+      onChange(selectedPoiTypes.filter((selectedId) => selectedId !== id));
       return;
     }
 

@@ -1,5 +1,9 @@
 import { logger } from "../../utils/logger";
-import { trackExternalRequest } from "../apiUsageTracker";
+import { requestExternalApi } from "../externalApiRequest";
+import {
+  getGoogleAndroidRestrictionHeaders,
+  getGoogleWebServicesApiKey,
+} from "../../config/providerConfig";
 import {
   getCanonicalPoiCategoryId,
   getGoogleTypesForPoiCategoryIds,
@@ -220,24 +224,16 @@ export async function fetchPoisForRoutePointAndType({
   radiusMeters = 3000,
   maxResultCount = 5,
 }) {
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const androidPackageName = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
-  const androidCertSha1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
-
-  if (!apiKey) {
-    throw new Error(
-      "Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY. Add it to your .env file.",
-    );
-  }
-
-  const response = await trackExternalRequest("google", "places-nearby", () =>
-    fetch(GOOGLE_PLACES_NEARBY_URL, {
+  const response = await requestExternalApi({
+    provider: "google",
+    operation: "places-nearby",
+    url: GOOGLE_PLACES_NEARBY_URL,
+    options: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Goog-Api-Key": apiKey,
-        "X-Android-Package": androidPackageName,
-        "X-Android-Cert": androidCertSha1,
+        "X-Goog-Api-Key": getGoogleWebServicesApiKey(),
+        ...getGoogleAndroidRestrictionHeaders(),
         /**
          * Keep this field mask lean.
          * More fields can increase cost and payload size.
@@ -264,8 +260,9 @@ export async function fetchPoisForRoutePointAndType({
           },
         },
       }),
-    }),
-  );
+    },
+    retryTransient: false,
+  });
 
   const data = await response.json();
 
@@ -277,14 +274,6 @@ export async function fetchPoisForRoutePointAndType({
     placeCount: data.places?.length ?? 0,
     firstPlace: data.places?.[0]?.displayName?.text ?? null,
   });
-
-  if (!response.ok) {
-    logger.log("[poiService] Google Places error:", {
-      googleType: providerType,
-      status: response.status,
-    });
-    throw new Error("Google Places request failed.");
-  }
 
   return (data.places || [])
     .map((place) => normalizeGooglePlace(place, providerType))

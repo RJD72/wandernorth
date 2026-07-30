@@ -260,7 +260,9 @@ const LEGACY_CATEGORY_LABELS = {
 };
 
 function normalizeCategoryId(id) {
-  return String(id || "").trim().toLowerCase();
+  return String(id || "")
+    .trim()
+    .toLowerCase();
 }
 
 function uniqueValues(values = []) {

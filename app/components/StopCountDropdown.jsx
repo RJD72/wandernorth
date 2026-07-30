@@ -47,9 +47,7 @@ export default function StopCountDropdown({
   return (
     <View className="w-full">
       {/* Field label rendered above the trigger button */}
-      <Text className="mb-2 text-sm font-semibold text-white">
-        {label}
-      </Text>
+      <Text className="mb-2 text-sm font-semibold text-white">{label}</Text>
 
       {/* Trigger button — displays the current selection and opens the modal on press */}
       <Pressable

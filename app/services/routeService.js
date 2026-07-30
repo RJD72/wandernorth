@@ -1,6 +1,6 @@
 import { isDemoModeEnabled } from "../config/demoMode";
 import { createDemoRoute } from "../fixtures/demoData";
-import { buildGoogleRoute } from "./googleRoutes";
+import { buildGoogleRoute, getRoutingPreferenceForRoute } from "./googleRoutes";
 import { routeRequestCache } from "./apiRequestCaches";
 import {
   recordCacheHit,
@@ -15,9 +15,14 @@ export function buildRoute(params) {
     recordDemoOperation("route");
     return Promise.resolve(createDemoRoute(params));
   }
+  const normalizedParams = {
+    ...params,
+    purpose: params?.purpose || "preview",
+    routingPreference: getRoutingPreferenceForRoute(params),
+  };
   return routeRequestCache.load(
-    createRouteRequestKey(params),
-    () => buildGoogleRoute(params),
+    createRouteRequestKey(normalizedParams),
+    () => buildGoogleRoute(normalizedParams),
     {
       onCacheHit: () => recordCacheHit("google", "routes"),
       onInFlightDeduplicated: () =>

@@ -27,7 +27,10 @@ describe("stopUtils", () => {
       { latitude: 43, longitude: -81 },
       { latitude: 43, longitude: -81 },
     ],
-    [{ lat: 43, lng: -81 }, { latitude: 43, longitude: -81 }],
+    [
+      { lat: 43, lng: -81 },
+      { latitude: 43, longitude: -81 },
+    ],
     [
       { location: { latitude: 43, longitude: -81 } },
       { latitude: 43, longitude: -81 },

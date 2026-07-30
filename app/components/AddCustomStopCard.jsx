@@ -8,7 +8,6 @@ import { isValidCoords } from "../utils/coordinates";
 export default function AddCustomStopCard({
   onAddStop = () => {},
   locationBias,
-  customSearchPoints = [],
 }) {
   const [customStopAddress, setCustomStopAddress] = useState("");
   const [customStopCoords, setCustomStopCoords] = useState(null);
@@ -89,7 +88,6 @@ export default function AddCustomStopCard({
           locationBias={locationBias}
           strictBounds={false}
           dropdownMode="inline"
-          customSearchPoints={customSearchPoints}
           onChangeText={(text) => {
             setCustomStopAddress(text);
             setCustomStopCoords(null);

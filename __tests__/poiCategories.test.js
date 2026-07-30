@@ -46,7 +46,9 @@ describe("poiCategories", () => {
   });
 
   test("provider mappings resolve only to canonical category IDs", () => {
-    const validIds = new Set(getAllPoiCategories().map((category) => category.id));
+    const validIds = new Set(
+      getAllPoiCategories().map((category) => category.id),
+    );
     for (const category of getAllPoiCategories()) {
       for (const type of category.googleTypes || []) {
         expect(validIds.has(getPoiCategoryIdForGoogleType(type))).toBe(true);

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import {
+  Alert,
   Image,
   Linking,
   Modal,
@@ -72,9 +73,21 @@ function PlacePhotoArea({ imageUrls = [], googleMapsUri }) {
     if (!googleMapsUri) return;
 
     try {
+      const canOpen = await Linking.canOpenURL(googleMapsUri);
+      if (!canOpen) {
+        Alert.alert(
+          "Google Maps unavailable",
+          "This place could not be opened on this device.",
+        );
+        return;
+      }
       await Linking.openURL(googleMapsUri);
     } catch (error) {
       logger.warn("Open Google Maps place details error:", error);
+      Alert.alert(
+        "Google Maps unavailable",
+        "This place could not be opened. Please try again.",
+      );
     }
   }
 
@@ -131,6 +144,7 @@ const SuggestedStopsList = ({
   allSelectedMessage = "All suggested stops have been selected.",
   poiLoading,
   poiError,
+  poiNotice,
   suggestedStops,
   totalSuggestedStopCount = 0,
   selectedStops,
@@ -290,6 +304,9 @@ const SuggestedStopsList = ({
           )}
 
           {poiError && <Text className="mt-3 text-red-600">{poiError}</Text>}
+          {poiNotice && !poiError && (
+            <Text className="mt-3 text-amber-700">{poiNotice}</Text>
+          )}
 
           {!poiLoading && !poiError && safeSuggestedStops.length === 0 && (
             <Text className="mt-3 text-stone-600">

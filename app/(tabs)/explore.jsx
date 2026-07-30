@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -12,11 +12,13 @@ import CurrentLocationToggle from "../components/CurrentLocationToggle";
 import RouteBuildingScreen from "../components/RouteBuildingScreen";
 import WNTransportSelector from "../components/WNTransportSelector";
 import PremiumFeatureCard from "../components/PremiumFeatureCard";
-import PremiumStatusDevCard from "../components/PremiumStatusDevCard";
 import DemoDataIndicator from "../components/DemoDataIndicator";
 
 import { buildRoute } from "../services/routeService";
+import { searchExploreCandidates } from "../services/exploreCandidateSearch";
 import { isDemoModeEnabled } from "../config/demoMode";
+import { allowDeveloperControls } from "../config/buildConfig";
+import { API_LIMITS } from "../config/apiLimits";
 import { DEMO_ROUTE_REQUEST } from "../fixtures/demoData";
 
 import { useRoutePlannerStore } from "../store/useRoutePlannerStore";
@@ -81,8 +83,6 @@ const AVERAGE_SPEED_BY_MODE_KMH = {
   bicycling: 18,
   walking: 5,
 };
-const MAX_EXPLORE_CANDIDATES = 25;
-
 function parseGoogleDurationSeconds(durationString) {
   if (typeof durationString !== "string") return null;
 
@@ -91,7 +91,7 @@ function parseGoogleDurationSeconds(durationString) {
   return Number.isFinite(seconds) ? seconds : null;
 }
 
-function getExploreDestinationCandidates({
+export function getExploreDestinationCandidates({
   startCoords,
   bearingDegrees,
   baseDistanceKm,
@@ -132,7 +132,7 @@ function getExploreDestinationCandidates({
     }
   }
 
-  return candidates.slice(0, MAX_EXPLORE_CANDIDATES);
+  return candidates.slice(0, API_LIMITS.exploreMaximumCandidates);
 }
 
 function getSmallestBearingDifferenceDegrees(a, b) {
@@ -186,7 +186,7 @@ function scoreExploreCandidate({
   return durationPenalty + directionPenalty + wideDriftPenalty;
 }
 
-async function findBestExploreDestination({
+export async function findBestExploreDestination({
   startCoords,
   directionConfig,
   targetTravelTimeMinutes,
@@ -202,20 +202,17 @@ async function findBestExploreDestination({
     targetTravelTimeMinutes,
   });
 
-  const successfulCandidates = [];
-
-  /**
-   * Sequential on purpose.
-   *
-   * Parallel would be faster, but it could burn a lot of Google Routes calls at once.
-   * For now, we try candidates one by one and stop if we find a good enough match.
-   */
-  for (const candidate of candidates) {
-    try {
+  const acceptableDurationDeltaSeconds = getAcceptableDurationDeltaSeconds(
+    targetTravelTimeMinutes,
+  );
+  const searchResult = await searchExploreCandidates({
+    candidates,
+    evaluateCandidate: async (candidate) => {
       const routePreview = await buildRoute({
         startingCoords: startCoords,
         destinationCoords: candidate.coords,
         travelMode,
+        purpose: "candidate",
       });
 
       const durationSeconds = parseGoogleDurationSeconds(routePreview.duration);
@@ -240,8 +237,6 @@ async function findBestExploreDestination({
         candidateScore,
       };
 
-      successfulCandidates.push(successfulCandidate);
-
       logger.log("[Explore] Candidate route succeeded:", {
         direction: directionConfig.key,
         bearingDegrees: candidate.bearingDegrees,
@@ -254,50 +249,46 @@ async function findBestExploreDestination({
           ? Math.round(durationDeltaSeconds / 60)
           : null,
         candidateScore: Math.round(candidateScore * 10) / 10,
-        coords: candidate.coords,
       });
 
-      const bearingDifference = getSmallestBearingDifferenceDegrees(
+      return successfulCandidate;
+    },
+    isAcceptable: (candidate) =>
+      candidate.durationDeltaSeconds <= acceptableDurationDeltaSeconds &&
+      getSmallestBearingDifferenceDegrees(
         candidate.bearingDegrees,
         directionConfig.bearingDegrees,
-      );
-
-      /**
-       * Only return early if the route is close to the requested time
-       * AND still respects the requested direction
-       */
-      const acceptableDurationDeltaSeconds = getAcceptableDurationDeltaSeconds(
-        targetTravelTimeMinutes,
-      );
-
-      if (
-        durationDeltaSeconds <= acceptableDurationDeltaSeconds &&
-        bearingDifference <= 30
-      ) {
-        return successfulCandidate;
-      }
-    } catch (error) {
+      ) <= 30,
+    onCandidateFailure: (candidate, error) => {
       logger.log("[Explore] Candidate route failed:", {
         direction: directionConfig.key,
         bearingDegrees: candidate.bearingDegrees,
         distanceKm: candidate.distanceKm,
-        coords: candidate.coords,
         error: error.message,
       });
-    }
-  }
+    },
+  });
+  const selectedCandidate = searchResult.candidate;
 
-  if (successfulCandidates.length === 0) {
-    return null;
-  }
+  logger.log("[Explore] Candidate search metrics:", {
+    ...searchResult.metrics,
+    result: selectedCandidate ? "selected" : "no-routable-candidate",
+    selectedDurationDeltaMinutes: Number.isFinite(
+      selectedCandidate?.durationDeltaSeconds,
+    )
+      ? Math.round(selectedCandidate.durationDeltaSeconds / 60)
+      : null,
+    selectedBearingDelta: selectedCandidate
+      ? Math.round(
+          getSmallestBearingDifferenceDegrees(
+            selectedCandidate.bearingDegrees,
+            directionConfig.bearingDegrees,
+          ),
+        )
+      : null,
+  });
 
-  /**
-   * If no candidate was close enough, use the successful one closest to
-   * the requested travel time.
-   */
-  return [...successfulCandidates].sort((a, b) => {
-    return a.candidateScore - b.candidateScore;
-  })[0];
+  return selectedCandidate;
 }
 
 /**
@@ -463,6 +454,7 @@ function DriveTimeSelector({ value, onChange }) {
 }
 
 const Explore = () => {
+  const adventureSubmissionInFlight = useRef(false);
   const router = useRouter();
 
   const {
@@ -562,12 +554,15 @@ const Explore = () => {
   }
 
   async function handleFindAdventure() {
+    if (adventureSubmissionInFlight.current) return;
+
     if (!canUseExplore) {
       setShowExplorePaywall(true);
       return;
     }
 
     try {
+      adventureSubmissionInFlight.current = true;
       setBuildingAdventure(true);
 
       let finalStartCoords = startingCoords;
@@ -622,6 +617,7 @@ const Explore = () => {
         destinationAddress: destinationLabel,
         startingCoords: finalStartCoords,
         destinationCoords: adventureDestinationCoords,
+        prefetchedRoute: adventureDestination.routePreview,
         travelMode: selectedTravelMode,
         numStops,
         selectedPoiTypes,
@@ -634,6 +630,7 @@ const Explore = () => {
         },
       });
     } finally {
+      adventureSubmissionInFlight.current = false;
       setBuildingAdventure(false);
     }
   }
@@ -783,7 +780,7 @@ const Explore = () => {
         )}
 
         <View className="mt-8 gap-4">
-          {__DEV__ && isDemoModeEnabled && (
+          {allowDeveloperControls && isDemoModeEnabled && (
             <WNButton
               label="Load Demo Adventure"
               onPress={handleLoadDemoAdventure}

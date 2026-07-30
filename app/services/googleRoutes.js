@@ -9,12 +9,11 @@
 
 // The API key is read from an Expo public environment variable so it is never
 // hard-coded in source. Expo inline EXPO_PUBLIC_* variables at build time.
-import { logger } from "../utils/logger";
-import { trackExternalRequest } from "./apiUsageTracker";
-
-const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-const ANDROID_PACKAGE_NAME = process.env.EXPO_PUBLIC_ANDROID_PACKAGE_NAME;
-const ANDROID_CERT_SHA1 = process.env.EXPO_PUBLIC_ANDROID_CERT_SHA1;
+import {
+  getGoogleAndroidRestrictionHeaders,
+  getGoogleWebServicesApiKey,
+} from "../config/providerConfig";
+import { requestExternalApi } from "./externalApiRequest";
 
 // ---------------------------------------------------------------------------
 // convertModeToGoogleMode
@@ -38,6 +37,15 @@ function convertModeToGoogleMode(mode) {
     bicycling: "BICYCLE",
   };
   return modeMap[mode] || "DRIVE";
+}
+
+export function getRoutingPreferenceForRoute({
+  travelMode,
+  purpose = "preview",
+} = {}) {
+  return travelMode === "driving" && purpose === "final"
+    ? "TRAFFIC_AWARE"
+    : "basic";
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +78,8 @@ export async function buildGoogleRoute({
   destinationCoords,
   travelMode,
   waypoints = [], // Optional array of intermediate waypoints (not currently used)
-  suppressErrorLog = false,
+  purpose = "preview",
+  routingPreference = getRoutingPreferenceForRoute({ travelMode, purpose }),
 }) {
   // Google Routes API v2 endpoint — all requests are POST with a JSON body
   const url = `https://routes.googleapis.com/directions/v2:computeRoutes`;
@@ -112,7 +121,8 @@ export async function buildGoogleRoute({
 
     // TRAFFIC_AWARE requests real-time traffic data for driving routes.
     // Not applicable for walking/cycling so we omit it for those modes.
-    routingPreference: travelMode === "driving" ? "TRAFFIC_AWARE" : undefined,
+    routingPreference:
+      routingPreference === "TRAFFIC_AWARE" ? "TRAFFIC_AWARE" : undefined,
 
     // Only return the single best route — we don't need to display alternatives
     computeAlternativeRoutes: false,
@@ -126,17 +136,19 @@ export async function buildGoogleRoute({
     polylineEncoding: "ENCODED_POLYLINE",
   };
 
-  const response = await trackExternalRequest("google", "routes", () =>
-    fetch(url, {
+  const response = await requestExternalApi({
+    provider: "google",
+    operation: `routes-${purpose}`,
+    url,
+    options: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
 
         // Required for authentication and billing.
         // Make sure to restrict this key in production!
-        "X-Goog-Api-Key": GOOGLE_API_KEY,
-        "X-Android-Package": ANDROID_PACKAGE_NAME,
-        "X-Android-Cert": ANDROID_CERT_SHA1,
+        "X-Goog-Api-Key": getGoogleWebServicesApiKey(),
+        ...getGoogleAndroidRestrictionHeaders(),
 
         // FieldMask controls which fields Google includes in the response.
         // Specifying only what we need reduces bandwidth and latency.
@@ -146,8 +158,9 @@ export async function buildGoogleRoute({
           "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs",
       },
       body: JSON.stringify(body),
-    }),
-  );
+    },
+    retryTransient: true,
+  });
 
   // Parse the JSON body regardless of HTTP status so error details are
   // available for logging even when the request fails.
@@ -155,20 +168,6 @@ export async function buildGoogleRoute({
 
   // Handle HTTP-level errors (4xx / 5xx). The API returns a structured error
   // object under data.error when this happens.
-  if (!response.ok) {
-    if (!suppressErrorLog) {
-      logger.error("Google Routes API error", { status: response.status });
-    }
-
-    const providerMessage = data?.error?.message;
-    const safeProviderMessage =
-      typeof providerMessage === "string" && GOOGLE_API_KEY
-        ? providerMessage.replaceAll(GOOGLE_API_KEY, "[redacted]")
-        : providerMessage;
-
-    throw new Error(safeProviderMessage || "Google route request failed");
-  }
-
   // Guard against a successful HTTP response that contains no route data
   // (e.g. origin and destination are in different countries with no road link)
   if (!data.routes || data.routes.length === 0) {
@@ -181,9 +180,6 @@ export async function buildGoogleRoute({
   // Return a normalized object so the rest of the app never has to deal with
   // the raw Google API shape directly.
   return {
-    // Keep the raw route in case any caller needs fields not listed below
-    raw: route,
-
     // Distance as a number (metres) and as a formatted string for display
     distanceMeters: route.distanceMeters,
     distanceText: formatDistance(route.distanceMeters),

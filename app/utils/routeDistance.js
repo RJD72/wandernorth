@@ -84,8 +84,7 @@ function toPlanarPointMeters(origin, point) {
       toRadians(point.longitude - origin.longitude) *
       earthRadiusMeters *
       Math.cos(originLatitudeRadians),
-    y:
-      toRadians(point.latitude - origin.latitude) * earthRadiusMeters,
+    y: toRadians(point.latitude - origin.latitude) * earthRadiusMeters,
   };
 }
 
@@ -108,13 +107,9 @@ function getClosestPointOnSegment(point, segmentStart, segmentEnd) {
   }
 
   const unboundedProjectionFactor =
-    (planarPoint.x * planarSegmentEnd.x +
-      planarPoint.y * planarSegmentEnd.y) /
+    (planarPoint.x * planarSegmentEnd.x + planarPoint.y * planarSegmentEnd.y) /
     segmentLengthSquared;
-  const projectionFactor = Math.min(
-    Math.max(unboundedProjectionFactor, 0),
-    1,
-  );
+  const projectionFactor = Math.min(Math.max(unboundedProjectionFactor, 0), 1);
 
   return {
     point: {
@@ -126,11 +121,7 @@ function getClosestPointOnSegment(point, segmentStart, segmentEnd) {
   };
 }
 
-function getDistanceToRouteSegmentMeters(
-  point,
-  segmentStart,
-  segmentEnd,
-) {
+function getDistanceToRouteSegmentMeters(point, segmentStart, segmentEnd) {
   const closestPoint = getClosestPointOnSegment(
     point,
     segmentStart,
@@ -223,10 +214,7 @@ export function getClosestRoutePointInfo(poi, routeCoords = []) {
     const segmentEnd = routeCoords[index + 1];
     const segmentDistanceMeters = getDistanceMeters(segmentStart, segmentEnd);
 
-    if (
-      !Number.isFinite(segmentDistanceMeters) ||
-      segmentDistanceMeters < 0
-    ) {
+    if (!Number.isFinite(segmentDistanceMeters) || segmentDistanceMeters < 0) {
       return fallbackInfo();
     }
 

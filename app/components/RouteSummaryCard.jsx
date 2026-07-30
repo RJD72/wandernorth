@@ -85,9 +85,7 @@ export default function RouteSummaryCard({
           Trip Preferences
         </Text>
 
-        <Text className="mt-1 text-stone-900">
-          Requested stops: {numStops}
-        </Text>
+        <Text className="mt-1 text-stone-900">Requested stops: {numStops}</Text>
 
         <Text className="mt-1 text-stone-900">
           Selected stops: {selectedStopCount}

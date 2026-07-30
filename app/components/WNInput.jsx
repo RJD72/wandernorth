@@ -33,9 +33,7 @@ const WNInput = forwardRef(
     ref,
   ) => {
     return (
-      <View
-        className={`${withBottomMargin ? "mb-4" : ""} ${className}`}
-      >
+      <View className={`${withBottomMargin ? "mb-4" : ""} ${className}`}>
         {label && (
           <Text className="text-text-primary ml-2 mb-2 font-medium">
             {label}
@@ -67,5 +65,7 @@ const WNInput = forwardRef(
     );
   },
 );
+
+WNInput.displayName = "WNInput";
 
 export default WNInput;

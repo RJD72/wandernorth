@@ -1,0 +1,7 @@
+coverage/
+dist/
+landing-page/
+node_modules/
+places.txt
+results.json
+

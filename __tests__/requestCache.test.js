@@ -127,9 +127,11 @@ describe("createRequestCache", () => {
     first.nested.count = 99;
     original.nested.count = 50;
 
-    await expect(cache.load("a", () => Promise.resolve(null))).resolves.toEqual({
-      nested: { count: 1 },
-    });
+    await expect(cache.load("a", () => Promise.resolve(null))).resolves.toEqual(
+      {
+        nested: { count: 1 },
+      },
+    );
   });
 
   test("different keys remain isolated", async () => {

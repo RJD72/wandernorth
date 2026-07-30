@@ -26,6 +26,11 @@ function loadSubject({ demo = false } = {}) {
   jest.doMock("../app/config/demoMode", () => ({ isDemoModeEnabled: demo }));
   jest.doMock("../app/services/googleRoutes", () => ({
     buildGoogleRoute: jest.fn(),
+    getRoutingPreferenceForRoute: jest.fn(({ travelMode, purpose }) =>
+      travelMode === "driving" && purpose === "final"
+        ? "TRAFFIC_AWARE"
+        : "basic",
+    ),
   }));
   const googleRoutes = require("../app/services/googleRoutes");
   const tracker = require("../app/services/apiUsageTracker");
@@ -95,7 +100,11 @@ describe("routeService contract", () => {
 
     await expect(buildRoute(params)).resolves.toEqual(result);
     expect(buildGoogleRoute).toHaveBeenCalledTimes(1);
-    expect(buildGoogleRoute).toHaveBeenCalledWith(params);
+    expect(buildGoogleRoute).toHaveBeenCalledWith({
+      ...params,
+      purpose: "preview",
+      routingPreference: "basic",
+    });
   });
 
   test("reuses a valid completed cache entry", async () => {
@@ -147,6 +156,14 @@ describe("routeService contract", () => {
     const b = { latitude: 43.8, longitude: -80.2 };
     await buildRoute(request({ waypoints: [a, b] }));
     await buildRoute(request({ waypoints: [b, a] }));
+    expect(buildGoogleRoute).toHaveBeenCalledTimes(2);
+  });
+
+  test("route purpose and routing preference remain isolated", async () => {
+    const { buildRoute, buildGoogleRoute } = loadSubject();
+    buildGoogleRoute.mockResolvedValue(normalizedRoute());
+    await buildRoute(request({ purpose: "preview" }));
+    await buildRoute(request({ purpose: "final" }));
     expect(buildGoogleRoute).toHaveBeenCalledTimes(2);
   });
 });
