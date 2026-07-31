@@ -69,7 +69,7 @@ module.exports = {
         backgroundColor: "#E6F4FE",
 
         // Foreground layer for adaptive icon.
-        foregroundImage: "./assets/icon.png",
+        foregroundImage: "./assets/images/adaptive-icon.png",
       },
     },
 
