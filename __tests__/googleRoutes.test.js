@@ -71,7 +71,7 @@ describe("googleRoutes adapter contract", () => {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": FAKE_KEY,
       "X-Android-Package": "com.example.test",
-      "X-Android-Cert": "AA:BB:CC",
+      "X-Android-Cert": "AABBCC",
       "X-Goog-FieldMask":
         "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs",
     });

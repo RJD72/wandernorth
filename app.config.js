@@ -102,6 +102,9 @@ module.exports = {
       appEnvironment:
         process.env.EXPO_PUBLIC_APP_ENV ||
         (process.env.NODE_ENV === "development" ? "development" : "production"),
+      eas: {
+        projectId: "207911a3-9717-4fc3-897b-cbc60459d926",
+      },
     },
   },
 };

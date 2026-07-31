@@ -49,7 +49,7 @@ describe("Google POI provider contract", () => {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": FAKE_KEY,
       "X-Android-Package": "com.example.test",
-      "X-Android-Cert": "AA:BB:CC",
+      "X-Android-Cert": "AABBCC",
       "X-Goog-FieldMask": expect.stringContaining("places.location"),
     });
     expect(body).toMatchObject({

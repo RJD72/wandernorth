@@ -134,7 +134,7 @@ describe("Google Places Autocomplete (New)", () => {
         headers: expect.objectContaining({
           "X-Goog-Api-Key": FAKE_KEY,
           "X-Android-Package": "com.rob.wandernorth",
-          "X-Android-Cert": "AA:BB:CC",
+          "X-Android-Cert": "AABBCC",
         }),
       }),
     );

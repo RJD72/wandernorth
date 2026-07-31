@@ -16,8 +16,12 @@ export function getGoogleAndroidRestrictionHeaders() {
 
   if (!packageName || !certificateSha1) return {};
 
+  const normalizedCertificateSha1 = certificateSha1
+    .replace(/[^a-fA-F0-9]/g, "")
+    .toUpperCase();
+
   return {
     "X-Android-Package": packageName,
-    "X-Android-Cert": certificateSha1,
+    "X-Android-Cert": normalizedCertificateSha1,
   };
 }

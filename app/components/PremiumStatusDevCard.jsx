@@ -3,13 +3,13 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { useEntitlementStore } from "../store/useEntitlementStore";
 import { isPremiumTier } from "../config/featureAccess";
-import { allowDeveloperControls } from "../config/buildConfig";
+import { allowPremiumTesting } from "../config/buildConfig";
 
 export default function PremiumStatusDevCard() {
   const { subscriptionTier, setPremiumForTesting } = useEntitlementStore();
   const premium = isPremiumTier(subscriptionTier);
 
-  if (!allowDeveloperControls) return null;
+  if (!allowPremiumTesting) return null;
 
   return (
     <View className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">

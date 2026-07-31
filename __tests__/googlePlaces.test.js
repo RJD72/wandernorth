@@ -54,7 +54,7 @@ describe("googlePlaces details contract", () => {
         headers: expect.objectContaining({
           "X-Goog-Api-Key": FAKE_KEY,
           "X-Android-Package": "com.example.test",
-          "X-Android-Cert": "AA:BB:CC",
+          "X-Android-Cert": "AABBCC",
           "X-Goog-FieldMask":
             "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
         }),
