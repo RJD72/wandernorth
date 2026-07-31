@@ -1,6 +1,6 @@
 import { Modal, Pressable, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { allowDeveloperControls } from "../config/buildConfig";
+import { allowPremiumTesting } from "../config/buildConfig";
 
 export default function PremiumFeatureCard({
   title,
@@ -12,7 +12,7 @@ export default function PremiumFeatureCard({
 }) {
   const canClose = typeof onClose === "function";
   const canEnablePremiumForTesting =
-    allowDeveloperControls &&
+    allowPremiumTesting &&
     showDevToggle &&
     typeof onEnablePremiumForTesting === "function";
 
