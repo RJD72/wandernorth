@@ -56,20 +56,19 @@ describe("googlePlaces details contract", () => {
           "X-Android-Package": "com.example.test",
           "X-Android-Cert": "AABBCC",
           "X-Goog-FieldMask":
-            "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
+            "id,displayName,formattedAddress,photos,rating,userRatingCount,googleMapsUri",
         }),
       }),
     );
   });
 
-  test("normalizes title, address, rating, reviews, Maps URI, and description", async () => {
+  test("normalizes retained details fields with a compatible null description", async () => {
     const { fetchGooglePlaceDetailsForStop } = loadSubject();
     fetch.mockResolvedValue(
       response({
         id: "place-one",
         displayName: { text: "Test Place" },
         formattedAddress: "1 Test Street",
-        editorialSummary: { text: "A useful stop" },
         rating: 4.7,
         userRatingCount: 123,
         googleMapsUri: "https://maps.example/place-one",
@@ -81,7 +80,7 @@ describe("googlePlaces details contract", () => {
       googlePlaceId: "place-one",
       title: "Test Place",
       address: "1 Test Street",
-      description: "A useful stop",
+      description: null,
       rating: 4.7,
       userRatingCount: 123,
       googleMapsUri: "https://maps.example/place-one",

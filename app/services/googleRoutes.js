@@ -39,15 +39,6 @@ function convertModeToGoogleMode(mode) {
   return modeMap[mode] || "DRIVE";
 }
 
-export function getRoutingPreferenceForRoute({
-  travelMode,
-  purpose = "preview",
-} = {}) {
-  return travelMode === "driving" && purpose === "final"
-    ? "TRAFFIC_AWARE"
-    : "basic";
-}
-
 // ---------------------------------------------------------------------------
 // buildGoogleRoute  (exported)
 // ---------------------------------------------------------------------------
@@ -79,7 +70,6 @@ export async function buildGoogleRoute({
   travelMode,
   waypoints = [], // Optional array of intermediate waypoints (not currently used)
   purpose = "preview",
-  routingPreference = getRoutingPreferenceForRoute({ travelMode, purpose }),
 }) {
   // Google Routes API v2 endpoint — all requests are POST with a JSON body
   const url = `https://routes.googleapis.com/directions/v2:computeRoutes`;
@@ -118,11 +108,6 @@ export async function buildGoogleRoute({
 
     // Convert the app's internal mode string to the Google API enum value
     travelMode: convertModeToGoogleMode(travelMode),
-
-    // TRAFFIC_AWARE requests real-time traffic data for driving routes.
-    // Not applicable for walking/cycling so we omit it for those modes.
-    routingPreference:
-      routingPreference === "TRAFFIC_AWARE" ? "TRAFFIC_AWARE" : undefined,
 
     // Only return the single best route — we don't need to display alternatives
     computeAlternativeRoutes: false,

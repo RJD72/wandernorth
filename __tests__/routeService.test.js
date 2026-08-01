@@ -26,11 +26,6 @@ function loadSubject({ demo = false } = {}) {
   jest.doMock("../app/config/demoMode", () => ({ isDemoModeEnabled: demo }));
   jest.doMock("../app/services/googleRoutes", () => ({
     buildGoogleRoute: jest.fn(),
-    getRoutingPreferenceForRoute: jest.fn(({ travelMode, purpose }) =>
-      travelMode === "driving" && purpose === "final"
-        ? "TRAFFIC_AWARE"
-        : "basic",
-    ),
   }));
   const googleRoutes = require("../app/services/googleRoutes");
   const tracker = require("../app/services/apiUsageTracker");
@@ -103,7 +98,6 @@ describe("routeService contract", () => {
     expect(buildGoogleRoute).toHaveBeenCalledWith({
       ...params,
       purpose: "preview",
-      routingPreference: "basic",
     });
   });
 
@@ -159,7 +153,7 @@ describe("routeService contract", () => {
     expect(buildGoogleRoute).toHaveBeenCalledTimes(2);
   });
 
-  test("route purpose and routing preference remain isolated", async () => {
+  test("route purposes remain isolated", async () => {
     const { buildRoute, buildGoogleRoute } = loadSubject();
     buildGoogleRoute.mockResolvedValue(normalizedRoute());
     await buildRoute(request({ purpose: "preview" }));

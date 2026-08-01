@@ -51,10 +51,10 @@ describe("googleRoutes adapter contract", () => {
   });
 
   test.each([
-    ["driving", "DRIVE", undefined],
-    ["walking", "WALK", undefined],
-    ["bicycling", "BICYCLE", undefined],
-  ])("builds the expected %s request", async (mode, googleMode, preference) => {
+    ["driving", "DRIVE"],
+    ["walking", "WALK"],
+    ["bicycling", "BICYCLE"],
+  ])("builds the expected %s request", async (mode, googleMode) => {
     const { buildGoogleRoute } = loadSubject();
     fetch.mockResolvedValue(jsonResponse({ routes: [successRoute()] }));
 
@@ -83,19 +83,17 @@ describe("googleRoutes adapter contract", () => {
       polylineEncoding: "ENCODED_POLYLINE",
       computeAlternativeRoutes: false,
     });
-    if (preference) {
-      expect(body.routingPreference).toBe(preference);
-    } else {
-      expect(body).not.toHaveProperty("routingPreference");
-    }
+    expect(body).not.toHaveProperty("routingPreference");
+    expect(JSON.stringify(body)).not.toContain("TRAFFIC_AWARE");
   });
 
-  test("requests traffic only for an explicitly final driving route", async () => {
+  test("final driving routes use Google's default routing behavior", async () => {
     const { buildGoogleRoute } = loadSubject();
     fetch.mockResolvedValue(jsonResponse({ routes: [successRoute()] }));
     await buildGoogleRoute({ ...baseParams, purpose: "final" });
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body.routingPreference).toBe("TRAFFIC_AWARE");
+    expect(body).not.toHaveProperty("routingPreference");
+    expect(JSON.stringify(body)).not.toContain("TRAFFIC_AWARE");
   });
 
   test("preserves ordered intermediate waypoints", async () => {

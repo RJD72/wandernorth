@@ -32,9 +32,9 @@ automatically.
 | Flow                         |                                               Before |                                                                                  After |
 | ---------------------------- | ---------------------------------------------------: | -------------------------------------------------------------------------------------: |
 | Navigate displayed route     |                                              1 Route |                                                                        1 preview Route |
-| Explore candidate evaluation |                        up to 25 traffic-aware Routes |        5-call first wave; second wave only if needed; 10 basic Routes absolute maximum |
+| Explore candidate evaluation |                                      up to 25 Routes |      5-call first wave; second wave only if needed; 10 default Routes absolute maximum |
 | Explore displayed route      |                                   1 additional Route |                                         0 when the selected candidate preview is valid |
-| Final route with waypoints   |                                1 traffic-aware Route |                                                 1 explicitly final traffic-aware Route |
+| Final route with waypoints   |                                              1 Route |                                                                        1 default Route |
 | POI search, Google only      |                                up to 15 Nearby calls |                                      10 first-wave calls plus at most 3 fallback calls |
 | POI search, Google + TomTom  |                                       up to 30 calls |                                      20 first-wave calls plus at most 6 fallback calls |
 | Custom/normal autocomplete   |      one request per 300 ms at 2+ chars plus Details | one request per 400 ms at 3+ chars, bounded duplicate cache, plus one matching Details |

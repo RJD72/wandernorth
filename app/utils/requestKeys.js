@@ -9,7 +9,6 @@ export function createRouteRequestKey({
   travelMode,
   waypoints = [],
   purpose = "preview",
-  routingPreference = "basic",
 }) {
   return [
     coordinate(startingCoords),
@@ -17,7 +16,6 @@ export function createRouteRequestKey({
     travelMode || "driving",
     waypoints.map(coordinate).join(";"),
     purpose,
-    routingPreference,
   ].join("|");
 }
 export function createPoiRequestKey({

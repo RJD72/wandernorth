@@ -22,21 +22,27 @@ import {
 } from "../utils/stopUtils";
 import { logger } from "../utils/logger";
 
-function getStopDescription(stop) {
-  if (!stop) return "No description available.";
+const STOP_DETAILS_DESCRIPTION_PLACEHOLDER =
+  "More information about this stop is coming soon.";
 
-  const existingDescription =
+function getProviderDescription(stop) {
+  if (!stop) return null;
+
+  return (
     asText(stop.description) ||
     asText(stop.summary) ||
     asText(stop.editorialSummary?.text) ||
-    asText(stop.editorial_summary?.overview);
+    asText(stop.editorial_summary?.overview) ||
+    null
+  );
+}
 
-  if (existingDescription) return existingDescription;
-
-  const title = getStopTitle(stop);
-  const category = getStopCategory(stop);
-
-  return `${title} is a suggested ${category} near your route. Google does not provide a description for this stop.`;
+export function getDisplayedStopDescription(placeDetails, stop) {
+  return (
+    asText(placeDetails?.description) ||
+    getProviderDescription(stop) ||
+    STOP_DETAILS_DESCRIPTION_PLACEHOLDER
+  );
 }
 
 function getStopImage(stop) {
@@ -255,8 +261,10 @@ const SuggestedStopsList = ({
 
   const modalAddress = activeStopDetails?.address ?? getStopAddress(activeStop);
 
-  const modalDescription =
-    activeStopDetails?.description ?? getStopDescription(activeStop);
+  const modalDescription = getDisplayedStopDescription(
+    activeStopDetails,
+    activeStop,
+  );
 
   const modalImageUrls = getUniqueImageUrls([
     ...(activeStopDetails?.imageUrls ?? []),

@@ -8,18 +8,18 @@ const baseRequest = {
 };
 
 describe("route request cache keys", () => {
-  test("include purpose and routing preference", () => {
+  test("include route purpose", () => {
     const preview = createRouteRequestKey({
       ...baseRequest,
       purpose: "preview",
-      routingPreference: "basic",
     });
     const final = createRouteRequestKey({
       ...baseRequest,
       purpose: "final",
-      routingPreference: "TRAFFIC_AWARE",
     });
     expect(preview).not.toBe(final);
+    expect(preview).not.toContain("TRAFFIC_AWARE");
+    expect(final).not.toContain("TRAFFIC_AWARE");
   });
 
   test("preserve nearby but distinct coordinates at five decimals", () => {

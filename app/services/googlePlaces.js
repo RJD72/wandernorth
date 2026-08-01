@@ -57,7 +57,7 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
           "X-Goog-Api-Key": getGoogleWebServicesApiKey(),
           ...getGoogleAndroidRestrictionHeaders(),
           "X-Goog-FieldMask":
-            "id,displayName,formattedAddress,photos,editorialSummary,rating,userRatingCount,googleMapsUri",
+            "id,displayName,formattedAddress,photos,rating,userRatingCount,googleMapsUri",
         },
       },
       retryTransient: true,
@@ -76,7 +76,7 @@ export async function fetchGooglePlaceDetailsForStop(stop) {
       title: data.displayName?.text ?? null,
       address: data.formattedAddress ?? null,
       imageUrls,
-      description: data.editorialSummary?.text ?? null,
+      description: null,
       rating: data.rating ?? null,
       userRatingCount: data.userRatingCount ?? null,
       googleMapsUri: data.googleMapsUri ?? null,
