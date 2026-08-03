@@ -99,7 +99,7 @@ describe("poiService orchestration", () => {
       point: routePoints[0],
       providerType: "third",
       radiusMeters: 6000,
-      maxResultCount: 5,
+      maxResultCount: 20,
     });
   });
 
@@ -337,6 +337,111 @@ describe("poiService orchestration", () => {
     expect(logger.log).toHaveBeenCalledWith(
       "[poiService] Provider result counts:",
       expect.objectContaining({ google: 2, tomtom: 2 }),
+    );
+  });
+
+  test("reuses provider/type/point requests across category and stop-count changes", async () => {
+    const provider = createProvider({ implementation: async () => [] });
+    provider.getProviderPoiTypes.mockImplementation((types) => [...types]);
+    provider.prioritizeProviderPoiTypesForSearch.mockImplementation((types) => [
+      ...types,
+    ]);
+    const { subject } = loadSubject([provider]);
+
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["restaurant"],
+      numStops: 2,
+    });
+    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(5);
+
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["restaurant", "park"],
+      numStops: 4,
+    });
+    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(10);
+
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["park", "restaurant"],
+      numStops: 3,
+    });
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["restaurant"],
+      numStops: 1,
+    });
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["restaurant", "park"],
+      numStops: 2,
+    });
+    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(10);
+  });
+
+  test("isolates identical provider request parameters by provider", async () => {
+    const google = createProvider({
+      id: "google",
+      implementation: async () => [],
+    });
+    const tomtom = createProvider({
+      id: "tomtom",
+      implementation: async () => [],
+    });
+    const { subject } = loadSubject([google, tomtom]);
+
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["cafe"],
+      numStops: 2,
+    });
+    await subject.fetchPoisNearRoutePoints({
+      routePoints,
+      selectedPoiTypes: ["cafe"],
+      numStops: 2,
+    });
+
+    expect(google.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(5);
+    expect(tomtom.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(5);
+  });
+
+  test("keeps cached provider results clean for route-specific recalculation", async () => {
+    const providerPoi = {
+      id: "google:clean",
+      provider: "google",
+      providerPlaceId: "clean",
+      name: "Clean result",
+      latitude: 43.005,
+      longitude: -81,
+    };
+    const provider = createProvider({
+      implementation: async () => [providerPoi],
+    });
+    const { subject } = loadSubject([provider]);
+    const { attachRoutePositionToPois } = require("../app/utils/routeDistance");
+    const request = {
+      routePoints: [routePoints[0]],
+      selectedPoiTypes: ["cafe"],
+      numStops: 1,
+    };
+
+    const first = await subject.fetchPoisNearRoutePoints(request);
+    const firstEnriched = attachRoutePositionToPois(first, [
+      { latitude: 43, longitude: -81 },
+      { latitude: 43.01, longitude: -81 },
+    ]);
+    const second = await subject.fetchPoisNearRoutePoints(request);
+    const secondEnriched = attachRoutePositionToPois(second, [
+      { latitude: 43.005, longitude: -81 },
+      { latitude: 43.005, longitude: -80.98 },
+    ]);
+
+    expect(provider.fetchPoisForRoutePointAndType).toHaveBeenCalledTimes(1);
+    expect(second[0]).not.toHaveProperty("routeProgress");
+    expect(second[0]).not.toHaveProperty("closestRouteDistanceMeters");
+    expect(firstEnriched[0].routeProgress).not.toBe(
+      secondEnriched[0].routeProgress,
     );
   });
 });

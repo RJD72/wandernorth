@@ -46,8 +46,10 @@ describe("tomtomPoiProvider", () => {
     expect(parsedUrl.searchParams.get("lat")).toBe("43.1");
     expect(parsedUrl.searchParams.get("lon")).toBe("-81.2");
     expect(parsedUrl.searchParams.get("radius")).toBe("3500");
-    expect(parsedUrl.searchParams.get("limit")).toBe("4");
+    expect(parsedUrl.searchParams.get("limit")).toBe("20");
     expect(parsedUrl.searchParams.get("countrySet")).toBe("CA");
+    expect(parsedUrl.searchParams.has("offset")).toBe(false);
+    expect(parsedUrl.searchParams.has("page")).toBe(false);
     expect(options.method).toBe("GET");
   });
 

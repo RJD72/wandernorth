@@ -5,8 +5,10 @@ import {
   getPoiCategoryIdForTomTomQuery,
   getTomTomQueriesForPoiCategoryIds,
 } from "../../config/poiCategories";
+import { MAX_POI_RESULTS_PER_REQUEST } from "../../config/poiRequestPolicy";
 
 const TOMTOM_POI_SEARCH_BASE_URL = "https://api.tomtom.com/search/2/poiSearch";
+const TOMTOM_POI_REQUEST_SCHEMA_VERSION = "tomtom-poi-search-v2";
 
 const LEGACY_TOMTOM_POI_QUERY_MAP = {
   bar: ["bar"],
@@ -172,7 +174,6 @@ export async function fetchPoisForRoutePointAndType({
   point,
   providerType,
   radiusMeters = 3000,
-  maxResultCount = 5,
 }) {
   const apiKey = process.env.EXPO_PUBLIC_TOMTOM_API_KEY;
 
@@ -187,7 +188,7 @@ export async function fetchPoisForRoutePointAndType({
     lat: String(point.latitude),
     lon: String(point.longitude),
     radius: String(radiusMeters),
-    limit: String(maxResultCount),
+    limit: String(MAX_POI_RESULTS_PER_REQUEST),
     countrySet: "CA",
   });
   const encodedProviderType = encodeURIComponent(providerType);
@@ -230,6 +231,12 @@ export async function fetchPoisForRoutePointAndType({
 
 export const tomtomPoiProvider = {
   id: "tomtom",
+  getRequestCacheOptions: () => ({
+    rankingPreference: "DEFAULT",
+    region: "CA",
+    language: "",
+    fieldMaskVersion: TOMTOM_POI_REQUEST_SCHEMA_VERSION,
+  }),
   normalizeSelectedPoiTypes,
   getProviderPoiTypes,
   prioritizeProviderPoiTypesForSearch,

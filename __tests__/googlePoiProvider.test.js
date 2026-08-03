@@ -54,11 +54,15 @@ describe("Google POI provider contract", () => {
     });
     expect(body).toMatchObject({
       includedTypes: ["cafe"],
-      maxResultCount: 5,
+      maxResultCount: 20,
       locationRestriction: {
         circle: { center: request.point, radius: 6000 },
       },
     });
+    expect(body).not.toHaveProperty("pageToken");
+    expect(options.headers["X-Goog-FieldMask"]).toBe(
+      "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri",
+    );
   });
 
   test("normalizes Google results into canonical app POIs", async () => {

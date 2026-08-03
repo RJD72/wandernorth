@@ -4,15 +4,10 @@ import {
   fetchPoisNearRoutePoints,
   getLastPoiSearchMetadata,
 } from "./poiService";
-import { activePoiProviders } from "./poiProviders";
-import { poiRequestCache } from "./apiRequestCaches";
 import {
-  recordCacheHit,
   recordDemoOperation,
   recordHighLevelOperation,
-  recordInFlightDeduplication,
 } from "./apiUsageTracker";
-import { createPoiRequestKey } from "../utils/requestKeys";
 let lastPoiResultMetadata = null;
 
 export function getLastPoiResultMetadata() {
@@ -30,20 +25,7 @@ export async function fetchPoisForRoute(params) {
         : DEMO_POIS.map((poi) => ({ ...poi })),
     );
   }
-  const providers = activePoiProviders.map((provider) => provider.id);
-  const key = createPoiRequestKey({ ...params, enabledProviders: providers });
-  const result = await poiRequestCache.load(
-    key,
-    async () => {
-      const pois = await fetchPoisNearRoutePoints(params);
-      return { pois, metadata: getLastPoiSearchMetadata() };
-    },
-    {
-      onCacheHit: () => recordCacheHit("poi-batch", "route-pois"),
-      onInFlightDeduplicated: () =>
-        recordInFlightDeduplication("poi-batch", "route-pois"),
-    },
-  );
-  lastPoiResultMetadata = result.metadata;
-  return result.pois;
+  const pois = await fetchPoisNearRoutePoints(params);
+  lastPoiResultMetadata = getLastPoiSearchMetadata();
+  return pois;
 }

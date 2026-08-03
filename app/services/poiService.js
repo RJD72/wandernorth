@@ -15,9 +15,53 @@ import { logger } from "../utils/logger";
 import { activePoiProviders, primaryPoiProvider } from "./poiProviders";
 import { getDistanceMeters } from "../utils/routeDistance";
 import { API_LIMITS } from "../config/apiLimits";
+import { MAX_POI_RESULTS_PER_REQUEST } from "../config/poiRequestPolicy";
+import {
+  createPoiCacheDiagnostics,
+  createPoiProviderRequestCacheKey,
+  loadPoiProviderRequest,
+} from "./poiProviderRequestCache";
 
 const CROSS_PROVIDER_DUPLICATE_DISTANCE_METERS = 75;
 let lastPoiSearchMetadata = null;
+
+function createProviderRequestTask({
+  provider,
+  point,
+  providerType,
+  diagnostics,
+}) {
+  const radiusMeters = provider.getSearchRadiusForType(providerType);
+  const requestOptions = provider.getRequestCacheOptions?.() ?? {
+    rankingPreference: "default",
+    region: "",
+    language: "",
+    fieldMaskVersion: `${provider.id}-poi-v1`,
+  };
+  const request = {
+    provider: provider.id,
+    providerType,
+    point,
+    radiusMeters,
+    maxResults: MAX_POI_RESULTS_PER_REQUEST,
+    ...requestOptions,
+  };
+  const cacheKey = createPoiProviderRequestCacheKey(request);
+
+  return () =>
+    loadPoiProviderRequest({
+      cacheKey,
+      provider: provider.id,
+      diagnostics,
+      loader: () =>
+        provider.fetchPoisForRoutePointAndType({
+          point,
+          providerType,
+          radiusMeters,
+          maxResultCount: MAX_POI_RESULTS_PER_REQUEST,
+        }),
+    });
+}
 
 export function getLastPoiSearchMetadata() {
   return lastPoiSearchMetadata ? { ...lastPoiSearchMetadata } : null;
@@ -284,6 +328,7 @@ export async function fetchPoisNearRoutePoints({
     routePoints,
     API_LIMITS.poiMaximumRoutePoints,
   );
+  const cacheDiagnostics = createPoiCacheDiagnostics();
 
   const firstWaveTasks = [];
   const fallbackWaveTasks = [];
@@ -328,12 +373,12 @@ export async function fetchPoisNearRoutePoints({
 
     for (const point of pointsToSearch) {
       for (const providerType of firstWaveTypes) {
-        firstWaveTasks.push(() =>
-          provider.fetchPoisForRoutePointAndType({
+        firstWaveTasks.push(
+          createProviderRequestTask({
+            provider,
             point,
             providerType,
-            radiusMeters: provider.getSearchRadiusForType(providerType),
-            maxResultCount: 5,
+            diagnostics: cacheDiagnostics,
           }),
         );
       }
@@ -341,12 +386,12 @@ export async function fetchPoisNearRoutePoints({
 
     for (const point of pointsToSearch.slice(0, 3)) {
       for (const providerType of fallbackTypes) {
-        fallbackWaveTasks.push(() =>
-          provider.fetchPoisForRoutePointAndType({
+        fallbackWaveTasks.push(
+          createProviderRequestTask({
+            provider,
             point,
             providerType,
-            radiusMeters: provider.getSearchRadiusForType(providerType),
-            maxResultCount: 5,
+            diagnostics: cacheDiagnostics,
           }),
         );
       }
@@ -397,6 +442,18 @@ export async function fetchPoisNearRoutePoints({
   const crossProviderDedupedPois = dedupeLikelySamePlacesAcrossProviders(
     providerIdDedupedPois,
   );
+  const providerResultCounts = getProviderResultCounts(allPois);
+  Object.entries(providerResultCounts).forEach(([provider, rawPoiCount]) => {
+    if (cacheDiagnostics.byProvider[provider]) {
+      cacheDiagnostics.byProvider[provider].rawPoiCount = rawPoiCount;
+    }
+  });
+  const cacheSummary = {
+    ...cacheDiagnostics,
+    requestedTypesByProvider: searchedTypesByProvider,
+    totalRawPois: allPois.length,
+    totalDeduplicatedPois: crossProviderDedupedPois.length,
+  };
 
   lastPoiSearchMetadata = {
     routePointCount: pointsToSearch.length,
@@ -408,10 +465,13 @@ export async function fetchPoisNearRoutePoints({
       (result) => result.status === "rejected",
     ).length,
     partial: settledResults.some((result) => result.status === "rejected"),
+    cacheSummary,
   };
 
+  logger.log("[poiCache] Search summary", cacheSummary);
+
   logger.log("[poiService] Provider result counts:", {
-    ...getProviderResultCounts(allPois),
+    ...providerResultCounts,
     totalBeforeDedupe: allPois.length,
     totalAfterProviderIdDedupe: providerIdDedupedPois.length,
     totalAfterCrossProviderDedupe: crossProviderDedupedPois.length,

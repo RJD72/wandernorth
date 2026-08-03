@@ -3,8 +3,6 @@ export const API_LIMITS = Object.freeze({
   retryBaseDelayMs: 250,
   routeCacheMaxEntries: 40,
   routeCacheTtlMs: 3 * 60 * 1000,
-  poiCacheMaxEntries: 40,
-  poiCacheTtlMs: 10 * 60 * 1000,
   placeDetailsCacheMaxEntries: 40,
   placeDetailsCacheTtlMs: 30 * 60 * 1000,
   autocompleteCacheMaxEntries: 40,

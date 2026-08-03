@@ -56,17 +56,23 @@ same session token. Abandoned interactions discard their token.
 ## Runtime safeguards
 
 - Route cache: 40 entries, 3-minute TTL, in-flight deduplication
-- POI cache: 40 entries, 10-minute TTL, in-flight deduplication
+- POI provider-request cache: 400 entries, 24-hour TTL, in-flight
+  deduplication; keys isolate provider, provider type, normalized point,
+  radius, 20-result limit, ranking, region/language, and response schema
 - Autocomplete cache: 40 entries, 2-minute TTL, scoped to its session token
 - Place Details cache: 40 entries, 30-minute TTL
 - Geocoding cache: 75 entries, 20-minute TTL
 - Route coordinates in keys: five decimal places; waypoint order, purpose, and
   routing preference are included
 - POI sampling: at most five distance-distributed route points
+- POI result limit: up to 20 results per Google Nearby Search or TomTom POI
+  Search request, with no pagination
 - POI first wave: at most two provider query types per provider
 - POI fallback: one additional type at at most three points, only when the first
   wave has fewer candidates than requested stops plus a two-item browse buffer
 - POI concurrency: four active requests
+- POI provider results: process memory only. Complete Google/TomTom records are
+  not written to AsyncStorage; force-closing the app clears this cache
 - External timeout: 12 seconds
 - Retry: at most one with exponential delay and jitter; never on normal 4xx,
   denied keys, quota exhaustion, or the POI matrix

@@ -18,16 +18,3 @@ export function createRouteRequestKey({
     purpose,
   ].join("|");
 }
-export function createPoiRequestKey({
-  routePoints = [],
-  selectedPoiTypes = [],
-  numStops = 3,
-  enabledProviders = [],
-}) {
-  return [
-    routePoints.map(coordinate).join(";"),
-    selectedPoiTypes.join(","),
-    String(numStops),
-    enabledProviders.join(","),
-  ].join("|");
-}

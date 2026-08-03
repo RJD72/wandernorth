@@ -7,16 +7,12 @@ const params = {
   numStops: 2,
 };
 
-function loadSubject({ demo = false, providerIds = ["google"] } = {}) {
+function loadSubject({ demo = false } = {}) {
   jest.resetModules();
-  const activePoiProviders = providerIds.map((id) => ({ id }));
   jest.doMock("../app/config/demoMode", () => ({ isDemoModeEnabled: demo }));
   jest.doMock("../app/services/poiService", () => ({
     fetchPoisNearRoutePoints: jest.fn(),
     getLastPoiSearchMetadata: jest.fn(() => null),
-  }));
-  jest.doMock("../app/services/poiProviders", () => ({
-    activePoiProviders,
   }));
   const poiService = require("../app/services/poiService");
   const tracker = require("../app/services/apiUsageTracker");
@@ -25,7 +21,6 @@ function loadSubject({ demo = false, providerIds = ["google"] } = {}) {
     fetchPoisForRoute: require("../app/services/poiSearchService")
       .fetchPoisForRoute,
     fetchPoisNearRoutePoints: poiService.fetchPoisNearRoutePoints,
-    activePoiProviders,
     tracker,
   };
 }
@@ -68,15 +63,17 @@ describe("poiSearchService contract", () => {
     expect(fetchPoisNearRoutePoints).toHaveBeenCalledWith(params);
   });
 
-  test("aggregate cache reuses completed batches", async () => {
+  test("does not cache combined category or stop-count batches", async () => {
     const { fetchPoisForRoute, fetchPoisNearRoutePoints } = loadSubject();
     fetchPoisNearRoutePoints.mockResolvedValue([{ id: "one" }]);
     await fetchPoisForRoute(params);
     await fetchPoisForRoute(params);
-    expect(fetchPoisNearRoutePoints).toHaveBeenCalledTimes(1);
+    await fetchPoisForRoute({ ...params, numStops: 3 });
+    await fetchPoisForRoute({ ...params, selectedPoiTypes: ["cafe"] });
+    expect(fetchPoisNearRoutePoints).toHaveBeenCalledTimes(4);
   });
 
-  test("aggregate cache deduplicates simultaneous batches", async () => {
+  test("delegates simultaneous batches so request-level caching can deduplicate", async () => {
     const { fetchPoisForRoute, fetchPoisNearRoutePoints } = loadSubject();
     let resolveBatch;
     fetchPoisNearRoutePoints.mockReturnValue(
@@ -87,7 +84,7 @@ describe("poiSearchService contract", () => {
     const first = fetchPoisForRoute(params);
     const second = fetchPoisForRoute(params);
     await Promise.resolve();
-    expect(fetchPoisNearRoutePoints).toHaveBeenCalledTimes(1);
+    expect(fetchPoisNearRoutePoints).toHaveBeenCalledTimes(2);
     resolveBatch([{ id: "one" }]);
     await Promise.all([first, second]);
   });
@@ -101,27 +98,5 @@ describe("poiSearchService contract", () => {
     await expect(fetchPoisForRoute(params)).resolves.toEqual([
       { id: "recovered" },
     ]);
-  });
-
-  test.each([
-    ["route points", { routePoints: [{ latitude: 42, longitude: -82 }] }],
-    ["category selection", { selectedPoiTypes: ["museum", "park"] }],
-    ["category order", { selectedPoiTypes: ["park", "cafe"] }],
-    ["stop count", { numStops: 3 }],
-  ])("cache isolates different %s", async (_label, change) => {
-    const { fetchPoisForRoute, fetchPoisNearRoutePoints } = loadSubject();
-    fetchPoisNearRoutePoints.mockResolvedValue([]);
-    await fetchPoisForRoute(params);
-    await fetchPoisForRoute({ ...params, ...change });
-    expect(fetchPoisNearRoutePoints).toHaveBeenCalledTimes(2);
-  });
-
-  test("cache keys isolate enabled providers", async () => {
-    const loaded = loadSubject({ providerIds: ["google"] });
-    loaded.fetchPoisNearRoutePoints.mockResolvedValue([]);
-    await loaded.fetchPoisForRoute(params);
-    loaded.activePoiProviders.push({ id: "tomtom" });
-    await loaded.fetchPoisForRoute(params);
-    expect(loaded.fetchPoisNearRoutePoints).toHaveBeenCalledTimes(2);
   });
 });

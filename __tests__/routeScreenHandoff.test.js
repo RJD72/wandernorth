@@ -33,4 +33,13 @@ describe("Route screen handoff architecture", () => {
     );
     expect(source).not.toContain("globally optimized");
   });
+
+  test("keeps same-route POIs visible during category refresh and guards stale responses", () => {
+    expect(source).toContain("lastPoiRouteIdentityRef");
+    expect(source).toContain("const routeChanged =");
+    expect(source).toContain("if (routeChanged) {");
+    expect(source).toContain("if (!isCurrent) return;");
+    expect(source).toContain('logger.log("[route] Route POIs loaded:"');
+    expect(source).not.toContain("All route POIs cached");
+  });
 });

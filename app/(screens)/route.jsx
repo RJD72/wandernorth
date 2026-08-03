@@ -7,7 +7,7 @@ import {
   Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import polyline from "@mapbox/polyline";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -101,6 +101,7 @@ const Route = () => {
   const [poiNotice, setPoiNotice] = useState(null);
   const [suggestedStops, setSuggestedStops] = useState([]);
   const [allRoutePois, setAllRoutePois] = useState([]);
+  const lastPoiRouteIdentityRef = useRef(null);
 
   const [selectedStops, setSelectedStops] = useState([]);
 
@@ -579,6 +580,7 @@ const Route = () => {
 
     async function loadSuggestedStops() {
       if (requestedSavedTripMode) {
+        lastPoiRouteIdentityRef.current = null;
         setSuggestedStops([]);
         setAllRoutePois([]);
         setPoiLoading(false);
@@ -588,6 +590,7 @@ const Route = () => {
 
       // Skip POI work until route geometry exists.
       if (!routeData?.routeCoords?.length) {
+        lastPoiRouteIdentityRef.current = null;
         setSuggestedStops([]);
         setAllRoutePois([]);
         setPoiError(null);
@@ -599,8 +602,18 @@ const Route = () => {
         setPoiLoading(true);
         setPoiError(null);
         setPoiNotice(null);
-        setSuggestedStops([]);
-        setAllRoutePois([]);
+
+        const routeIdentity =
+          routeData.encodedPolyline ||
+          routeData.routeCoords
+            .map(({ latitude, longitude }) => `${latitude},${longitude}`)
+            .join(";");
+        const routeChanged = lastPoiRouteIdentityRef.current !== routeIdentity;
+        if (routeChanged) {
+          lastPoiRouteIdentityRef.current = routeIdentity;
+          setSuggestedStops([]);
+          setAllRoutePois([]);
+        }
 
         const routeSamplePoints = getSamplePointsAlongRoute(
           routeData.routeCoords,
@@ -612,6 +625,8 @@ const Route = () => {
           selectedPoiTypes, // Array of user-selected POI categories (e.g., ["restaurant", "park"]) that will be mapped to Google Place types within the service.
           numStops, // The desired number of stops, which can be used by the service to prioritize or limit results. This value is passed as-is and can be a number or numeric string; the service should handle coercion and validation.
         });
+        if (!isCurrent) return;
+
         const searchMetadata = getLastPoiResultMetadata();
         if (searchMetadata?.partial) {
           setPoiNotice(
@@ -631,8 +646,6 @@ const Route = () => {
             "To control beta API use, the selected categories were prioritized in a bounded search.",
           );
         }
-
-        if (!isCurrent) return;
 
         const routeAwarePois = attachRoutePositionToPois(
           // This function enriches each POI with metadata about its proximity and position along the route, which is essential for sorting and filtering POIs based on how relevant they are to the user's journey.
@@ -669,7 +682,10 @@ const Route = () => {
 
         setAllRoutePois(nearbyRoutePois);
 
-        logger.log("[route] All route POIs cached:", nearbyRoutePois.length);
+        logger.log("[route] Route POIs loaded:", {
+          poiCount: nearbyRoutePois.length,
+          cacheSummary: searchMetadata?.cacheSummary ?? null,
+        });
 
         const distributedStops = chooseDistributedStops(
           nearbyRoutePois,
@@ -700,8 +716,6 @@ const Route = () => {
         if (!isCurrent) return;
 
         logger.log("Suggested stops error:", error);
-        setSuggestedStops([]);
-        setAllRoutePois([]);
         setPoiError("Unable to load suggested stops.");
       } finally {
         if (isCurrent) {

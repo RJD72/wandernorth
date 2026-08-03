@@ -9,9 +9,13 @@ import {
   getGoogleTypesForPoiCategoryIds,
   getPoiCategoryIdForGoogleType,
 } from "../../config/poiCategories";
+import { MAX_POI_RESULTS_PER_REQUEST } from "../../config/poiRequestPolicy";
 
 const GOOGLE_PLACES_NEARBY_URL =
   "https://places.googleapis.com/v1/places:searchNearby";
+export const GOOGLE_POI_FIELD_MASK =
+  "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri";
+const GOOGLE_POI_REQUEST_SCHEMA_VERSION = `google-nearby-v1:${GOOGLE_POI_FIELD_MASK}`;
 
 const LEGACY_GOOGLE_PLACE_TYPE_MAP = {
   bar: ["bar"],
@@ -215,14 +219,12 @@ function normalizeGooglePlace(place, fallbackCategory) {
  * @param {{ latitude: number, longitude: number }} args.point
  * @param {string} args.providerType
  * @param {number} [args.radiusMeters=3000]
- * @param {number} [args.maxResultCount=5]
  * @returns {Promise<object[]>}
  */
 export async function fetchPoisForRoutePointAndType({
   point,
   providerType,
   radiusMeters = 3000,
-  maxResultCount = 5,
 }) {
   const response = await requestExternalApi({
     provider: "google",
@@ -242,12 +244,11 @@ export async function fetchPoisForRoutePointAndType({
          * identity, display text, coordinates, category, lightweight quality
          * signals, and a maps deep link.
          */
-        "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.rating,places.userRatingCount,places.googleMapsUri",
+        "X-Goog-FieldMask": GOOGLE_POI_FIELD_MASK,
       },
       body: JSON.stringify({
         includedTypes: [providerType],
-        maxResultCount,
+        maxResultCount: MAX_POI_RESULTS_PER_REQUEST,
         rankPreference: "DISTANCE",
         regionCode: "CA",
         locationRestriction: {
@@ -282,6 +283,12 @@ export async function fetchPoisForRoutePointAndType({
 
 export const googlePoiProvider = {
   id: "google",
+  getRequestCacheOptions: () => ({
+    rankingPreference: "DISTANCE",
+    region: "CA",
+    language: "",
+    fieldMaskVersion: GOOGLE_POI_REQUEST_SCHEMA_VERSION,
+  }),
   normalizeSelectedPoiTypes,
   getProviderPoiTypes,
   prioritizeProviderPoiTypesForSearch,
