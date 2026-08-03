@@ -7,7 +7,7 @@ import {
   Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import polyline from "@mapbox/polyline";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -40,11 +40,20 @@ import {
   getPoiCategoryLabelById,
 } from "../config/poiCategories";
 
-import { getSamplePointsAlongRoute } from "../utils/routeSampling";
+import {
+  getCustomStopSearchPoints,
+  getRoutePointAtDistancePercentage,
+  getSamplePointsAlongRoute,
+} from "../utils/routeSampling";
 import { attachRoutePositionToPois } from "../utils/routeDistance";
+import {
+  buildGoogleMapsDirectionsUrl,
+  MAX_GOOGLE_MAPS_WAYPOINTS,
+  prepareStopsForRouteHandoff,
+} from "../utils/routeHandoff";
 import { chooseDistributedStops } from "../utils/poiScoring";
 import { isValidCoords } from "../utils/coordinates";
-import { getStopCoords, getStopId } from "../utils/stopUtils";
+import { getStopId } from "../utils/stopUtils";
 import { MAX_DISTANCE_FROM_ROUTE_METERS } from "../utils/poiDistancePolicy";
 import { logger } from "../utils/logger";
 import { getExternalApiUserMessage } from "../services/externalApiRequest";
@@ -63,54 +72,11 @@ function getCustomStopCount(stops = []) {
   return stops.filter(isCustomStop).length;
 }
 
-function formatCoordinatesForGoogleMaps(coords) {
-  return `${coords.latitude},${coords.longitude}`;
-}
-
-function sortStopsByRouteProgress(stops = []) {
-  return [...stops].sort((a, b) => {
-    const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
-    const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
-
-    return aProgress - bProgress;
-  });
-}
-
 function buildSavedTripTitle(routeParams) {
   const startingAddress = routeParams?.startingAddress || "Start";
   const destinationAddress = routeParams?.destinationAddress || "Destination";
 
   return `${startingAddress} to ${destinationAddress}`;
-}
-
-function buildGoogleMapsDirectionsUrl({
-  origin,
-  destination,
-  selectedStops = [],
-  travelMode,
-}) {
-  const sortedStops = sortStopsByRouteProgress(selectedStops);
-
-  const waypoints = sortedStops
-    .map(getStopCoords)
-    .filter(Boolean)
-    .map(formatCoordinatesForGoogleMaps)
-    .join("|");
-
-  const queryParams = [
-    "api=1",
-    `origin=${encodeURIComponent(formatCoordinatesForGoogleMaps(origin))}`,
-    `destination=${encodeURIComponent(
-      formatCoordinatesForGoogleMaps(destination),
-    )}`,
-    `travelmode=${encodeURIComponent(travelMode)}`,
-  ];
-
-  if (waypoints) {
-    queryParams.push(`waypoints=${encodeURIComponent(waypoints)}`);
-  }
-
-  return `https://www.google.com/maps/dir/?${queryParams.join("&")}`;
 }
 
 function formatCategoryTitle(category) {
@@ -120,7 +86,6 @@ function formatCategoryTitle(category) {
 }
 
 const Route = () => {
-  const finalRouteSubmissionInFlight = useRef(false);
   // Primary route request lifecycle state.
   // - loading controls the initial screen state while route data is being built.
   // - routeData stores the normalized route payload used by the map and summary card.
@@ -139,9 +104,7 @@ const Route = () => {
 
   const [selectedStops, setSelectedStops] = useState([]);
 
-  const [finalRouteData, setFinalRouteData] = useState(null);
-  const [finalRouteLoading, setFinalRouteLoading] = useState(false);
-  const [finalRouteError, setFinalRouteError] = useState(null);
+  const [routeActionError, setRouteActionError] = useState(null);
   const [premiumGate, setPremiumGate] = useState(null);
   const [savingTrip, setSavingTrip] = useState(false);
   const [savedTripMessage, setSavedTripMessage] = useState(null);
@@ -246,14 +209,33 @@ const Route = () => {
   }
 
   async function handleOpenInGoogleMaps() {
-    const url = buildGoogleMapsDirectionsUrl({
-      origin: routeData.parsedParams.startingCoords,
-      destination: routeData.parsedParams.destinationCoords,
+    setRouteActionError(null);
+
+    const { orderedStops, invalidStops } = prepareStopsForRouteHandoff(
       selectedStops,
-      travelMode: routeData.parsedParams.travelMode,
-    });
+      routeData?.routeCoords,
+    );
+    if (invalidStops.length > 0) {
+      const message =
+        "One or more selected stops is missing valid coordinates. Remove or reselect the affected stop before opening Google Maps.";
+      setRouteActionError(message);
+      Alert.alert("Cannot open Google Maps", message);
+      return;
+    }
+    if (orderedStops.length > MAX_GOOGLE_MAPS_WAYPOINTS) {
+      const message = `Google Maps supports up to ${MAX_GOOGLE_MAPS_WAYPOINTS} Wander North stops. Remove a stop and try again.`;
+      setRouteActionError(message);
+      Alert.alert("Too many stops", message);
+      return;
+    }
 
     try {
+      const url = buildGoogleMapsDirectionsUrl({
+        origin: routeData?.parsedParams?.startingCoords,
+        destination: routeData?.parsedParams?.destinationCoords,
+        orderedStops,
+        travelMode: routeData?.parsedParams?.travelMode,
+      });
       const canOpen = await Linking.canOpenURL(url);
       if (!canOpen) {
         Alert.alert(
@@ -274,7 +256,7 @@ const Route = () => {
 
   function toggleSelectedStop(stop) {
     if (isLegacySavedTransitTrip) {
-      setFinalRouteError(
+      setRouteActionError(
         "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
       );
       return;
@@ -290,8 +272,7 @@ const Route = () => {
       });
 
       if (alreadySelected) {
-        setFinalRouteData(null);
-        setFinalRouteError(null);
+        setRouteActionError(null);
 
         if (isSavedTripMode) {
           setHasUnsavedSavedTripChanges(true);
@@ -307,8 +288,7 @@ const Route = () => {
         return currentStops;
       }
 
-      setFinalRouteData(null);
-      setFinalRouteError(null);
+      setRouteActionError(null);
 
       if (isSavedTripMode) {
         setHasUnsavedSavedTripChanges(true);
@@ -320,15 +300,14 @@ const Route = () => {
 
   function removeAllSelectedStops() {
     if (isLegacySavedTransitTrip) {
-      setFinalRouteError(
+      setRouteActionError(
         "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
       );
       return;
     }
 
     clearSaveTripStatus();
-    setFinalRouteData(null);
-    setFinalRouteError(null);
+    setRouteActionError(null);
     setSelectedStops([]);
     setPremiumGate(null);
 
@@ -341,7 +320,7 @@ const Route = () => {
     if (!customStop) return;
 
     if (isLegacySavedTransitTrip) {
-      setFinalRouteError(
+      setRouteActionError(
         "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
       );
       return;
@@ -350,7 +329,7 @@ const Route = () => {
     clearSaveTripStatus();
 
     if (!routeData?.routeCoords?.length) {
-      setFinalRouteError("Route data is not ready yet. Please try again");
+      setRouteActionError("Route data is not ready yet. Please try again");
       return;
     }
 
@@ -366,20 +345,26 @@ const Route = () => {
       return;
     }
 
-    const [routeAwareCustomStop] = attachRoutePositionToPois(
-      [customStop],
-      routeData.routeCoords,
-    );
+    const {
+      orderedStops: preparedCustomStops,
+      invalidStops: invalidCustomStops,
+    } = prepareStopsForRouteHandoff([customStop], routeData.routeCoords);
+    if (invalidCustomStops.length > 0) {
+      setRouteActionError(
+        "This custom stop is missing valid coordinates. Select it again and retry.",
+      );
+      return;
+    }
+    const [routeAwareCustomStop] = preparedCustomStops;
 
-    setFinalRouteData(null);
-    setFinalRouteError(null);
+    setRouteActionError(null);
 
     if (isSavedTripMode) {
       setHasUnsavedSavedTripChanges(true);
     }
 
     setSelectedStops((currentStops) => {
-      return [...currentStops, routeAwareCustomStop ?? customStop];
+      return [...currentStops, routeAwareCustomStop];
     });
   }
 
@@ -419,12 +404,8 @@ const Route = () => {
     .map(([category, stops]) => ({
       category,
       title: formatCategoryTitle(category),
-      stops: [...stops].sort((a, b) => {
-        const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 999;
-        const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 999;
-
-        return aProgress - bProgress;
-      }),
+      stops: prepareStopsForRouteHandoff(stops, routeData?.routeCoords)
+        .orderedStops,
     }))
     .sort((a, b) => a.title.localeCompare(b.title));
 
@@ -442,9 +423,7 @@ const Route = () => {
         setLoading(true);
         setError(null);
         setRouteData(null);
-        setFinalRouteData(null);
-        setFinalRouteLoading(false);
-        setFinalRouteError(null);
+        setRouteActionError(null);
         setSuggestedStops([]);
         setSelectedStops([]);
         setAllRoutePois([]);
@@ -500,18 +479,21 @@ const Route = () => {
           const savedSelectedStops = Array.isArray(savedTrip.selectedStops)
             ? savedTrip.selectedStops
             : [];
+          const preparedSavedStops = prepareStopsForRouteHandoff(
+            savedSelectedStops,
+            routeCoords,
+          );
+          const refreshedSavedStops = [
+            ...preparedSavedStops.orderedStops,
+            ...preparedSavedStops.invalidStops,
+          ];
 
           setRouteData({
             ...savedRoute,
             routeCoords,
             parsedParams: savedRouteRequest,
           });
-          setFinalRouteData({
-            ...savedRoute,
-            routeCoords,
-            selectedStops: savedSelectedStops,
-          });
-          setSelectedStops(savedSelectedStops);
+          setSelectedStops(refreshedSavedStops);
           setHasUnsavedSavedTripChanges(false);
           return;
         }
@@ -678,11 +660,11 @@ const Route = () => {
               rating: poi.rating,
               reviews: poi.userRatingCount,
             }))
-            .sort((a, b) => {
-              const aProgress = a.routeProgress ?? a.closestRouteIndex ?? 0;
-              const bProgress = b.routeProgress ?? b.closestRouteIndex ?? 0;
-              return aProgress - bProgress;
-            }),
+            .sort(
+              (a, b) =>
+                (a.routeProgress ?? Number.POSITIVE_INFINITY) -
+                (b.routeProgress ?? Number.POSITIVE_INFINITY),
+            ),
         );
 
         setAllRoutePois(nearbyRoutePois);
@@ -733,91 +715,6 @@ const Route = () => {
     };
   }, [requestedSavedTripMode, routeData, selectedPoiTypes, numStops]);
 
-  async function handleBuildFinalRoute() {
-    if (finalRouteSubmissionInFlight.current) return;
-
-    clearSaveTripStatus();
-
-    if (isLegacySavedTransitTrip) {
-      setFinalRouteError(
-        "This saved trip uses Transit, which is no longer available for new route planning. You can still view the saved route.",
-      );
-      return;
-    }
-
-    if (selectedStops.length === 0) {
-      setFinalRouteError(
-        "Choose at least one stop before building the final route.",
-      );
-      return;
-    }
-
-    if (selectedStops.length > maxSuggestedStops) {
-      setPremiumGate("moreStops");
-      return;
-    }
-
-    if (getCustomStopCount(selectedStops) > maxCustomStops) {
-      setPremiumGate("customStops");
-      return;
-    }
-
-    // Sort selected stops by their position along the original route before
-    // sending them to Google as waypoints.
-    //
-    // Without this, Google receives stops in the order the user tapped them.
-    // Example: Stop 3 → Stop 1 → Stop 2.
-    // That can create a final route that backtracks.
-    const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
-
-    // Convert sorted stops into waypoint coordinates for the final route request.
-    const waypointCoords = sortedSelectedStops
-      .map(getStopCoords)
-      .filter(Boolean);
-
-    if (waypointCoords.length !== selectedStops.length) {
-      setFinalRouteError("One or more selected stops is missing coordinates.");
-      return;
-    }
-
-    try {
-      finalRouteSubmissionInFlight.current = true;
-      setFinalRouteLoading(true);
-      setFinalRouteError(null);
-
-      const result = await buildRoute({
-        startingAddress: routeData.parsedParams.startingAddress,
-        destinationAddress: routeData.parsedParams.destinationAddress,
-        startingCoords: routeData.parsedParams.startingCoords,
-        destinationCoords: routeData.parsedParams.destinationCoords,
-        travelMode: routeData.parsedParams.travelMode,
-        selectedPoiTypes: routeData.parsedParams.selectedPoiTypes,
-        numStops: selectedStops.length,
-        waypoints: waypointCoords,
-        purpose: "final",
-      });
-
-      const routeCoords = polyline
-        .decode(result.encodedPolyline)
-        .map(([latitude, longitude]) => ({
-          latitude,
-          longitude,
-        }));
-
-      setFinalRouteData({
-        ...result,
-        routeCoords,
-        selectedStops,
-      });
-    } catch (error) {
-      logger.log("Final route build error:", error);
-      setFinalRouteError(getExternalApiUserMessage(error));
-    } finally {
-      finalRouteSubmissionInFlight.current = false;
-      setFinalRouteLoading(false);
-    }
-  }
-
   async function handleSaveTrip() {
     clearSaveTripStatus();
 
@@ -836,17 +733,18 @@ const Route = () => {
       return null;
     }
 
-    if (!finalRouteData) {
+    const { orderedStops, invalidStops } = prepareStopsForRouteHandoff(
+      selectedStops,
+      routeData.routeCoords,
+    );
+    if (invalidStops.length > 0) {
       setSaveTripError(
-        isSavedTripMode
-          ? "Rebuild the final route before updating this saved trip."
-          : "Build the final route before saving this trip.",
+        "One or more selected stops is missing valid coordinates. Remove or reselect the affected stop before saving.",
       );
       return null;
     }
 
-    const routeToSave = finalRouteData;
-    const sortedSelectedStops = sortStopsByRouteProgress(selectedStops);
+    const routeToSave = routeData;
     const savedTripPayload = {
       title: isSavedTripMode
         ? activeSavedTrip?.title || buildSavedTripTitle(routeData.parsedParams)
@@ -863,8 +761,8 @@ const Route = () => {
         distanceText: routeToSave.distanceText ?? null,
         duration: routeToSave.duration ?? null,
         durationText: routeToSave.durationText ?? null,
-        selectedStopCount: sortedSelectedStops.length,
-        isFinalRoute: true,
+        selectedStopCount: orderedStops.length,
+        isFinalRoute: false,
       },
       route: {
         encodedPolyline: routeToSave.encodedPolyline ?? null,
@@ -872,9 +770,9 @@ const Route = () => {
         distanceText: routeToSave.distanceText ?? null,
         duration: routeToSave.duration ?? null,
         durationText: routeToSave.durationText ?? null,
-        isFinalRoute: true,
+        isFinalRoute: false,
       },
-      selectedStops: sortedSelectedStops,
+      selectedStops: orderedStops,
       selectedPoiTypes,
       numStops,
     };
@@ -921,12 +819,28 @@ const Route = () => {
     }
   }
 
-  const displayedRouteData = finalRouteData ?? routeData;
-  const mapMarkers = selectedStops;
-  const routeMidpoint =
-    routeData?.routeCoords?.[
-      Math.floor((routeData?.routeCoords?.length ?? 0) / 2)
-    ];
+  const preparedSelectedStops = useMemo(
+    () =>
+      prepareStopsForRouteHandoff(selectedStops, routeData?.routeCoords ?? []),
+    [routeData?.routeCoords, selectedStops],
+  );
+  const orderedSelectedStops = useMemo(
+    () => [
+      ...preparedSelectedStops.orderedStops,
+      ...preparedSelectedStops.invalidStops,
+    ],
+    [preparedSelectedStops],
+  );
+  const displayedRouteData = routeData;
+  const mapMarkers = orderedSelectedStops;
+  const customStopSearchPoints = useMemo(
+    () => getCustomStopSearchPoints(routeData?.routeCoords),
+    [routeData?.routeCoords],
+  );
+  const routeMidpoint = useMemo(
+    () => getRoutePointAtDistancePercentage(routeData?.routeCoords, 0.5),
+    [routeData?.routeCoords],
+  );
   const customStopLocationBias = routeMidpoint
     ? {
         latitude: routeMidpoint.latitude,
@@ -1013,25 +927,6 @@ const Route = () => {
           </View>
         </CollapsibleSection>
 
-        {finalRouteData && (
-          <View className="mt-4 rounded-2xl bg-white p-4 shadow-sm">
-            <Text className="text-xl font-bold text-emerald-950">
-              {isSavedTripMode ? "Saved route reopened" : "Final route ready"}
-            </Text>
-
-            <Text className="mt-2 text-base text-stone-600">
-              {isSavedTripMode
-                ? "Add or remove stops, rebuild the final route, then update this saved trip."
-                : "Your selected stops have been added to the route."}
-            </Text>
-
-            <Text className="mt-1 text-sm font-semibold text-emerald-950">
-              {selectedStops.length} selected{" "}
-              {selectedStops.length === 1 ? "stop" : "stops"} included.
-            </Text>
-          </View>
-        )}
-
         <CollapsibleSection
           title="Route Summary"
           subtitle={`${
@@ -1057,7 +952,7 @@ const Route = () => {
           }`}
         >
           <SelectedStopsList
-            selectedStops={selectedStops}
+            selectedStops={orderedSelectedStops}
             onRemoveStop={toggleSelectedStop}
             onRemoveAllStops={removeAllSelectedStops}
             emptyMessage={
@@ -1106,6 +1001,8 @@ const Route = () => {
           <AddCustomStopCard
             onAddStop={handleAddCustomStop}
             locationBias={customStopLocationBias}
+            customSearchPoints={customStopSearchPoints}
+            routeCoords={routeData?.routeCoords ?? []}
           />
         </CollapsibleSection>
 
@@ -1185,33 +1082,23 @@ const Route = () => {
 
         <CollapsibleSection
           title="Trip Actions"
-          subtitle="Build, save, update, or open this route."
+          subtitle="Save, update, or open this route."
         >
-          {finalRouteError && (
-            <Text className="mb-2 text-sm text-red-600">{finalRouteError}</Text>
-          )}
-
-          {finalRouteData && (
-            <View className="mb-3">
-              <WNButton
-                label="Open in Google Maps"
-                onPress={handleOpenInGoogleMaps}
-              />
-            </View>
+          {routeActionError && (
+            <Text className="mb-2 text-sm text-red-600">
+              {routeActionError}
+            </Text>
           )}
 
           {selectedStops.length > 0 && (
             <View className="mb-3">
+              <Text className="mb-2 text-sm text-stone-600">
+                Stops are ordered along your route. Google Maps will calculate
+                the roads between them.
+              </Text>
               <WNButton
-                label={
-                  finalRouteLoading
-                    ? "Building Final Route..."
-                    : finalRouteData
-                      ? "Rebuild Final Route"
-                      : "Build Final Route"
-                }
-                onPress={handleBuildFinalRoute}
-                disabled={finalRouteLoading}
+                label="Open in Google Maps"
+                onPress={handleOpenInGoogleMaps}
               />
             </View>
           )}

@@ -55,4 +55,21 @@ describe("external API request infrastructure", () => {
     ).rejects.toBeInstanceOf(ExternalApiError);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  test("exposes a non-success response to a safe diagnostic callback", async () => {
+    const onNonOkResponse = jest.fn();
+    const response = { ok: false, status: 400 };
+    fetch.mockResolvedValue(response);
+
+    await expect(
+      requestExternalApi({
+        provider: "test",
+        operation: "diagnostic",
+        url: "https://example.test",
+        onNonOkResponse,
+      }),
+    ).rejects.toBeInstanceOf(ExternalApiError);
+
+    expect(onNonOkResponse).toHaveBeenCalledWith(response, { attempt: 1 });
+  });
 });

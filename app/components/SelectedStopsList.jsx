@@ -62,6 +62,8 @@ export default function SelectedStopsList({
 
               <Pressable
                 onPress={() => onRemoveStop(stop)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${getStopTitle(stop)}`}
                 className="rounded-full bg-red-100 px-3 py-1"
               >
                 <Text className="text-sm font-semibold text-red-700">

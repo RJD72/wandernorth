@@ -95,12 +95,13 @@ which also removes locally saved trips.
 Test on at least two physical Android devices and one constrained network:
 
 - Navigate start and destination autocomplete, selection, coordinates, route
-  display, automatic stops, final route, and Google Maps handoff
+  display, automatic stops, route-ordered Google Maps handoff, and no second
+  Routes API request
 - Explore starting-point autocomplete/current location, all directions, early
   candidate success, no-candidate state, and route display without a duplicate
   displayed-route request
-- Custom-stop route-biased autocomplete, keyboard/dropdown scrolling,
-  selection, route rebuild, and stale-response cancellation
+- Custom-stop route-wide search, keyboard/dropdown scrolling, selection,
+  route-order display/handoff, and stale-response cancellation
 - zero automatic stops produces no POI calls
 - saved route, reopen from stored polyline without a route request, edit, update,
   delete, uninstall/data-loss expectation

@@ -1,4 +1,8 @@
-import { getSamplePointsAlongRoute } from "../app/utils/routeSampling";
+import {
+  getCustomStopSearchPoints,
+  getRoutePointAtDistancePercentage,
+  getSamplePointsAlongRoute,
+} from "../app/utils/routeSampling";
 
 describe("getSamplePointsAlongRoute", () => {
   test("returns an empty array for empty or invalid routes", () => {
@@ -71,5 +75,47 @@ describe("getSamplePointsAlongRoute", () => {
       expect(Number.isFinite(sample.latitude)).toBe(true);
       expect(Number.isFinite(sample.longitude)).toBe(true);
     }
+  });
+});
+
+describe("custom-stop route search sampling", () => {
+  test("selects start, quarter, midpoint, three-quarter, and destination", () => {
+    const route = Array.from({ length: 9 }, (_, index) => ({
+      latitude: 43,
+      longitude: -81 + index * 0.1,
+    }));
+    const samples = getCustomStopSearchPoints(route);
+
+    expect(samples).toHaveLength(5);
+    expect(samples[0]).toEqual(route[0]);
+    expect(samples[1].longitude).toBeCloseTo(-80.8, 4);
+    expect(samples[2].longitude).toBeCloseTo(-80.6, 4);
+    expect(samples[3].longitude).toBeCloseTo(-80.4, 4);
+    expect(samples[4]).toEqual(route[route.length - 1]);
+  });
+
+  test("uses travelled distance instead of polyline array indexes", () => {
+    const route = [
+      { latitude: 43, longitude: -81 },
+      { latitude: 43, longitude: -80.99 },
+      { latitude: 43, longitude: -80.98 },
+      { latitude: 43, longitude: -80.5 },
+      { latitude: 43, longitude: -80 },
+    ];
+    const midpoint = getRoutePointAtDistancePercentage(route, 0.5);
+
+    expect(midpoint.longitude).toBeCloseTo(-80.5, 2);
+    expect(midpoint.longitude).not.toBeCloseTo(route[2].longitude, 2);
+  });
+
+  test("handles missing, invalid, one-point, and degenerate routes", () => {
+    const onlyPoint = { latitude: 43, longitude: -81 };
+
+    expect(getCustomStopSearchPoints()).toEqual([]);
+    expect(getCustomStopSearchPoints([null, { latitude: "x" }])).toEqual([]);
+    expect(getCustomStopSearchPoints([onlyPoint])).toEqual([onlyPoint]);
+    expect(getCustomStopSearchPoints([onlyPoint, onlyPoint])).toEqual([
+      onlyPoint,
+    ]);
   });
 });

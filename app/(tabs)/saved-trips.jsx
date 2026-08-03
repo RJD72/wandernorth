@@ -373,8 +373,8 @@ export default function SavedTrips() {
                   No saved trips yet
                 </Text>
                 <Text className="mt-2 text-sm leading-5 text-stone-600">
-                  Build a final route with at least one stop, then tap Save
-                  Trip.
+                  Add at least one stop, then tap Save Trip to keep the original
+                  route and ordered stops on this device.
                 </Text>
               </View>
             )}

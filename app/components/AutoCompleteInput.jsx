@@ -16,6 +16,10 @@ import {
   fetchAutocompletePredictions,
   fetchPlaceDetailsNew,
 } from "../services/googlePlacesAutocomplete";
+import {
+  fetchRouteTextSearchPredictions,
+  mergeRouteAndAutocompletePredictions,
+} from "../services/googleRouteTextSearch";
 import { API_LIMITS } from "../config/apiLimits";
 
 function getPredictionName(prediction) {
@@ -47,6 +51,8 @@ export default function AutocompleteInput({
   locationBias = null,
   strictBounds = false,
   dropdownMode = "absolute",
+  customSearchPoints = [],
+  routeCoords = [],
 }) {
   // ============ STATE MANAGEMENT ============
 
@@ -100,7 +106,7 @@ export default function AutocompleteInput({
   /**
    * Debounced prediction fetching on input change
    * Only fetches predictions while user is typing and input is 2+ characters
-   * 300ms debounce prevents excessive API calls
+   * 400ms debounce prevents excessive API calls
    */
   /** Mental Model
    * Wait until the user pauses typing for 300ms before making an API call. This allows users to type without triggering an API call on every keystroke, which would waste API quota and lead to a poor user experience. The dropdown will only show when the user is actively typing and has entered enough characters to yield useful results. If the user deletes characters and the input becomes too short, we clear the predictions and hide the dropdown immediately to avoid showing irrelevant suggestions.
@@ -165,20 +171,54 @@ export default function AutocompleteInput({
       }
 
       sessionTokenRef.current ??= createAutocompleteSessionToken();
-      const autocompletePredictions = await fetchAutocompletePredictions({
+      const autocompletePromise = fetchAutocompletePredictions({
         inputText,
         sessionToken: sessionTokenRef.current,
         locationBias,
         strictBounds,
         signal: abortController.signal,
       });
+      const routeTextSearchPromise =
+        customSearchPoints.length > 0
+          ? fetchRouteTextSearchPredictions({
+              inputText,
+              searchPoints: customSearchPoints,
+              routeCoords,
+              interactionToken: sessionTokenRef.current,
+              signal: abortController.signal,
+            })
+          : Promise.resolve([]);
+      const [autocompleteResult, routeTextSearchResult] =
+        await Promise.allSettled([autocompletePromise, routeTextSearchPromise]);
+
+      if (abortController.signal.aborted) return;
+
+      const autocompletePredictions =
+        autocompleteResult.status === "fulfilled"
+          ? autocompleteResult.value
+          : [];
+      const routeTextSearchPredictions =
+        routeTextSearchResult.status === "fulfilled"
+          ? routeTextSearchResult.value
+          : [];
+      const mergedPredictions = mergeRouteAndAutocompletePredictions(
+        routeTextSearchPredictions,
+        autocompletePredictions,
+      );
+
+      if (
+        autocompleteResult.status === "rejected" &&
+        routeTextSearchPredictions.length === 0
+      ) {
+        throw autocompleteResult.reason;
+      }
 
       if (latestPredictionRequestId.current !== requestId) {
         return;
       }
 
-      if (autocompletePredictions.length > 0) {
-        setPredictions(autocompletePredictions);
+      if (mergedPredictions.length > 0) {
+        setPredictions(mergedPredictions);
         setShowList(true);
       } else {
         setPredictions([]);

@@ -157,7 +157,7 @@ flowchart TD
 11. **Stale-result guard — verified.** Effect cleanup sets `isCurrent = false`; state writes are skipped after dependency change/unmount, but active provider requests are not cancelled.
 12. **Lazy detail requests — verified.** `SuggestedStopsList` may separately call `fetchGooglePlaceDetailsForStop` in `app/services/googlePlaces.js` through its `loadDetails` callback when its detail UI is opened. That tracked `google:place-details` GET enriches title/address/photos/rating/Maps URI while preserving a nullable description field for UI compatibility. It is not part of the initial batch and only works for stops with a Google place id.
 
-## 4. Select a stop and build the final route
+## 4. Select stops and hand off to Google Maps
 
 ### Mermaid flowchart
 
@@ -167,29 +167,26 @@ flowchart TD
   B --> C["toggleSelectedStop - route.jsx"]
   C --> D["getStopId - stopUtils.js"]
   D --> E["setSelectedStops functional update"]
-  E --> F["Clear finalRouteData and errors"]
-  F --> G["React rerender with selected stop"]
-  G --> H["Build Final Route press"]
-  H --> I["handleBuildFinalRoute"]
-  I --> J["sortStopsByRouteProgress"]
-  J --> K["getStopCoords for each stop"]
-  K --> L["await buildRoute with waypoints"]
-  L --> M["route cache or tracked Google Routes request"]
-  M --> N["decode encodedPolyline"]
-  N --> O["setFinalRouteData"]
-  O --> P["React rerender map and summary"]
+  E --> F["prepareStopsForRouteHandoff for ordered display"]
+  F --> G["React rerender selected list in route order"]
+  G --> H["Open in Google Maps press"]
+  H --> I["Recalculate all stop progress from original route"]
+  I --> J{"Coordinates valid and at most nine stops?"}
+  J -- No --> K["Show local error and stop"]
+  J -- Yes --> L["Build encoded Google Maps directions URL"]
+  L --> M["Linking.openURL"]
 ```
 
 ### Numbered walkthrough
 
 1. **UI selection event — verified.** A `Pressable` inside `SuggestedStopsList` calls its `onToggleStop(stop)` prop. Route passes `toggleSelectedStop` for both Top Suggestions and category lists.
 2. **Identity/limits — verified.** `toggleSelectedStop` calls `getStopId` from `app/utils/stopUtils.js`, clears save status, and uses the functional form of `setSelectedStops`. Existing ids are removed; new stops are appended unless `isAtSelectedStopLimit` triggers the premium gate. A legacy saved transit trip is read-only.
-3. **Invalidation — verified.** Any successful add/remove sets `finalRouteData` and `finalRouteError` to null. In saved-trip mode it also sets `hasUnsavedSavedTripChanges(true)`. These local state writes rerender selected markers/lists and expose the Build Final Route button when at least one stop exists.
-4. **UI build event — verified.** `WNButton` in Trip Actions calls `handleBuildFinalRoute`.
-5. **Guards — verified.** The handler rejects legacy transit, zero stops, too many total stops, too many custom stops, and any stop without coordinates.
-6. **Waypoint order — verified.** `sortStopsByRouteProgress` orders a copy by `routeProgress`, then `closestRouteIndex`, then zero. `getStopCoords` accepts several normalized/provider shapes. The resulting waypoint coordinate array must match selected-stop count.
-7. **External route request path — verified.** `handleBuildFinalRoute` awaits `buildRoute` with original endpoints/travel mode and the ordered `waypoints`. The waypoint list is part of `createRouteRequestKey`, so a different stop/order creates a different route-cache entry. A miss calls tracked Google Routes as in Flow 1, now placing waypoints in the request's `intermediates` array.
-8. **Final UI — verified.** The encoded polyline is decoded; `setFinalRouteData` stores the normalized result, decoded coordinates, and current selected stops. React rerenders `MapComponent` and `RouteSummaryCard` from `displayedRouteData = finalRouteData ?? routeData`. The original `routeData.routeCoords` remains the reference geometry for POI progress and custom-stop attachment.
+3. **Ordering utility — verified.** `prepareStopsForRouteHandoff` extracts coordinates with `getStopCoords`, recalculates continuous travelled-route progress with `getClosestRoutePointInfo`, preserves stop properties, and stable-sorts known progress before unknown progress. Coordinate-invalid stops are returned separately.
+4. **Honest display — verified.** Route memoizes the prepared result from `selectedStops` and the original `routeData.routeCoords`, then passes `orderedSelectedStops` to `SelectedStopsList`. Rendering does not mutate Zustand or local selection order, and removal still identifies the supplied stop through `getStopId`.
+5. **Handoff event — verified.** The Trip Actions `WNButton` calls `handleOpenInGoogleMaps`. The handler recalculates the same ordered result immediately before handoff.
+6. **Local guards — verified.** Any invalid selected coordinate blocks handoff with a visible error and alert. More than nine waypoints is rejected before URL construction.
+7. **Google Maps URL — verified.** `buildGoogleMapsDirectionsUrl` safely encodes origin, destination, travel mode, and the ordered waypoint string. Google Maps receives the route-progress order and chooses roads between consecutive stops.
+8. **No second route request — verified.** Route contains one `buildRoute` call for initial geometry only. Handoff uses `Linking.canOpenURL`/`Linking.openURL`; it does not call Google Routes, Places, TomTom, or waypoint optimization.
 
 ## 5. Add a custom stop
 
@@ -198,33 +195,33 @@ flowchart TD
 ```mermaid
 flowchart TD
   A["Type in custom AutocompleteInput"] --> B["handleInputChange"]
-  B --> C["300ms useEffect debounce"]
+  B --> C["400ms useEffect debounce"]
   C --> D["fetchPredictions"]
-  D --> E["Tracked Autocomplete (New) with route-midpoint bias"]
+  D --> E["Autocomplete (New) fallback plus five route Text Searches"]
   E --> F["Prediction press -> handleSelect"]
   F --> G["Place Details (New) with matching session token"]
   G --> H["AddCustomStopCard onSelectLocation callback"]
   H --> I["Add Custom Stop press"]
   I --> J["AddCustomStopCard.handleAddCustomStop"]
   J --> K["Route.handleAddCustomStop callback"]
-  K --> L["attachRoutePositionToPois"]
+  K --> L["prepareStopsForRouteHandoff"]
   L --> M["setSelectedStops"]
-  M --> N["React rerender; final route invalidated"]
+  M --> N["React rerender in route order"]
 ```
 
 ### Numbered walkthrough
 
-1. **Derived search geography — verified.** Route calculates `customStopLocationBias` from the original route midpoint and passes it through `AddCustomStopCard` to `AutocompleteInput` with an inline dropdown.
-2. **Typing event/debounce — verified.** `AutocompleteInput.handleInputChange` sets local `isTyping`, updates `input`, and calls `AddCustomStopCard`'s `onChangeText`, which clears previously selected coordinates/metadata. A `useEffect` waits 300 ms; cleanup cancels the timer after newer input. It then calls async `fetchPredictions`.
-3. **Autocomplete request — verified.** Outside demo mode, `fetchPredictions` calls tracked `google:places-autocomplete` against Places Autocomplete (New), restricting results to Canada and applying the route-midpoint circle as `locationBias`. A session token is reused across predictions in the interaction. There is no route-point Text Search matrix.
+1. **Derived search geography — verified.** Route memoizes five custom-search points at 0%, 25%, 50%, 75%, and 100% of travelled route distance. The true travelled-distance midpoint supplies the ordinary Autocomplete fallback bias.
+2. **Typing event/debounce — verified.** `AutocompleteInput.handleInputChange` sets local `isTyping`, updates `input`, and calls `AddCustomStopCard`'s `onChangeText`, which clears previously selected coordinates/metadata. A `useEffect` waits 400 ms; cleanup cancels the timer after newer input. It then calls async `fetchPredictions`.
+3. **Autocomplete request — verified.** Outside demo mode, `fetchPredictions` concurrently starts the ordinary Canadian Autocomplete (New) fallback and up to five Places Text Search (New) requests biased around the travelled-distance route samples. Text Search results retain coordinates, are ranked by name match and route position/distance, and remain ahead of deduplicated ordinary predictions. The Autocomplete session token is reused within the interaction; unchanged query/route Text Search matrices are cached by that interaction token.
 4. **Stale callback protection — verified.** `latestPredictionRequestId` increments for input changes, fetches, and selection. Superseded prediction/detail requests are aborted, and older results return without setting state.
-5. **Prediction selection — verified.** The prediction `Pressable` calls `handleSelect`. It closes UI, optimistically updates the parent, then either uses coordinates embedded in a demo prediction or awaits private `fetchPlaceDetails`, which delegates to a tracked Place Details (New) request with the matching session token.
-6. **Component callback — verified.** `handleSelect` calls `AddCustomStopCard`'s `onSelectLocation(address, coords, metadata)`, which stores local address, coordinate, and place metadata. These React state updates rerender the card.
+5. **Prediction selection — verified.** The prediction `Pressable` calls `handleSelect`. It closes UI, optimistically updates the parent, then uses coordinates already returned by Text Search/demo data or awaits private `fetchPlaceDetails` for an ordinary prediction with the matching session token.
+6. **Component callback — verified.** `handleSelect` calls `AddCustomStopCard`'s `onSelectLocation(address, coords, metadata)`, which stores local address, coordinate, and place metadata and calculates informational route distance/progress from the original route coordinates. These React state updates rerender the card.
 7. **Add button event — verified.** The `Add Custom Stop` `WNButton` calls `AddCustomStopCard.handleAddCustomStop`. It validates non-empty text and selected coordinates, derives name/address, constructs a custom object with a generated id and Google place id, then calls Route's `handleAddCustomStop` prop callback.
-8. **Route attachment — verified.** `Route.handleAddCustomStop` enforces route readiness, transit/entitlement/total-stop limits, then calls `attachRoutePositionToPois([customStop], routeData.routeCoords)`. It invalidates `finalRouteData`, marks reopened trips dirty, and appends the route-aware stop with functional `setSelectedStops`.
-9. **Next step — verified.** Adding the stop does not automatically rebuild the final route. The user must follow Flow 4's Build Final Route action.
+8. **Route attachment — verified.** `Route.handleAddCustomStop` enforces route readiness, transit/entitlement/total-stop limits, then calls `prepareStopsForRouteHandoff([customStop], routeData.routeCoords)`. Invalid coordinates are rejected; valid stops retain identity/provider fields and receive refreshed proximity/progress metadata even when far from the route.
+9. **Next step — verified.** Adding the stop updates the ordered display immediately. The user can save the original route plus ordered stops or hand them directly to Google Maps without a second Routes API request.
 
-There is no result cache or in-flight request deduplication in `AutocompleteInput`; its debounce reduces provider work, while abort controllers and request ids cancel or ignore superseded work.
+Autocomplete and custom route Text Search use bounded request caches. The 400 ms debounce reduces provider work, while abort controllers and request ids cancel or ignore superseded work.
 
 ## 6. Save and reopen a trip
 
@@ -233,9 +230,9 @@ There is no result cache or in-flight request deduplication in `AutocompleteInpu
 ```mermaid
 flowchart TD
   A["Save Trip press - Route"] --> B["handleSaveTrip - route.jsx"]
-  B --> C{"Premium, route, stops, final route valid?"}
+  B --> C{"Premium, route, stops and coordinates valid?"}
   C -- No --> D["Local error or premium gate"]
-  C -- Yes --> E["sortStopsByRouteProgress and build payload"]
+  C -- Yes --> E["prepareStopsForRouteHandoff and build payload"]
   E --> F["addTrip - useSavedTripsStore"]
   F --> G["saveTrip - savedTripsService.js"]
   G --> H["enqueue"]
@@ -253,15 +250,15 @@ flowchart TD
   S -- No --> T["loadTripById -> AsyncStorage"]
   S -- Yes --> U["Decode stored encodedPolyline"]
   T --> U
-  U --> V["setRouteData + setFinalRouteData + setSelectedStops"]
+  U --> V["Refresh stop progress + setRouteData + setSelectedStops"]
   V --> W["POI effect skips provider work"]
 ```
 
 ### Numbered walkthrough
 
 1. **Save UI event — verified.** Route's Save/Update `WNButton` calls `handleSaveTrip`.
-2. **Guards — verified.** `handleSaveTrip` clears old status, checks `featureLimits.canSaveTrips`, requires `routeData`, at least one selected stop, and `finalRouteData`. Thus an initial route cannot be saved until Flow 4 builds a final route.
-3. **Payload — verified.** The handler route-orders stops and creates `savedTripPayload` with title, source, original `routeRequest`, summary metrics, final route metrics/encoded polyline, selected stops/categories, and stop count. New titles come from `buildSavedTripTitle`; updates preserve `activeSavedTrip.title` when present.
+2. **Guards — verified.** `handleSaveTrip` clears old status, checks `featureLimits.canSaveTrips`, requires `routeData` and at least one selected stop, and blocks coordinate-invalid stops. It does not require or build a final route.
+3. **Payload — verified.** The handler calls `prepareStopsForRouteHandoff` and creates `savedTripPayload` with title, source, original `routeRequest`, original route metrics/encoded polyline, refreshed route-ordered stops, selected categories, and stop count. New titles come from `buildSavedTripTitle`; updates preserve `activeSavedTrip.title` when present.
 4. **Store boundary — verified.** A new save awaits `useSavedTripsStore.addTrip`; a reopened save awaits `updateTrip(activeSavedTrip.id, payload)`. Loading/error/message flags are local React state; `savedTrips`, `activeSavedTrip`, and `savedTripsError` are Zustand state.
 5. **Serialized local persistence — verified.** `addTrip` calls service `saveTrip` in `app/services/savedTripsService.js`. `saveTrip` calls private `enqueue`, which chains the operation behind module-level `operationTail`; all service reads/writes are serialized Promises, preventing overlapping AsyncStorage read-modify-write operations.
 6. **Read/validate/write — verified.** `readEnvelope` awaits `AsyncStorage.getItem`, parses JSON, supports a legacy top-level array, validates schema 2, calls `normalizeStoredTrips`, sorts newest-first, and may write normalized/migrated data. `saveTrip` calls `validatePayload`, creates/preserves id and timestamps, normalizes, then `writeEnvelope` awaits `AsyncStorage.setItem` under key `wanderNorth.savedTrips.v1`.
@@ -269,8 +266,8 @@ flowchart TD
 8. **Saved screen load — verified.** When `SavedTrips` in `app/(tabs)/saved-trips.jsx` renders with entitlement, its `useEffect` calls Zustand `loadTrips`. `loadTrips` toggles `loadingSavedTrips`, awaits service `loadSavedTrips`, then writes the list/error/recovery state and schedules a rerender.
 9. **Reopen UI event/navigation — verified.** `SavedTripCard` invokes the `onOpen` callback; `handleOpenSavedTrip(trip)` writes the whole record to Zustand using `setActiveSavedTrip`, then `router.push` navigates to `/(screens)/route` with `returnTo`, `savedTripId`, and `mode: "savedTrip"` URL params.
 10. **Reopen effect — verified.** Route derives `isSavedTripMode` only when mode and ids match. Nested `loadRoute` uses the existing `activeSavedTrip`; if it does not match, it awaits Zustand `loadTripById`, which calls service `loadSavedTripById` -> `enqueue` -> `readEnvelope` and updates `activeSavedTrip`.
-11. **Restore, not rebuild — verified.** Route validates stored request/polyline, decodes the saved final polyline, and directly calls `setRouteData`, `setFinalRouteData`, and `setSelectedStops`. It does not call `buildRoute`. The POI effect sees `requestedSavedTripMode` and clears/skips suggestions, so reopen makes no route or POI provider requests.
-12. **Editing/update — verified.** Changing reopened stops invalidates `finalRouteData` and marks the trip dirty. The user must rebuild the final route before `handleSaveTrip` can call `updateTrip`. Store `updateTrip` calls service `updateSavedTrip`, which preserves id/created timestamp, validates the merged record, writes it, reloads all trips, and updates matching `activeSavedTrip`.
+11. **Restore, not rebuild — verified.** Route validates and decodes the stored polyline, refreshes old or stale stop metadata against that available route geometry, then calls `setRouteData` and `setSelectedStops`. Invalid legacy stops remain visible so handoff can block clearly. It does not call `buildRoute`, and the POI effect skips provider work.
+12. **Editing/update — verified.** Changing reopened stops marks the trip dirty. `handleSaveTrip` recalculates ordering and calls `updateTrip` without rebuilding a route. Store `updateTrip` preserves id/created timestamp, validates the merged record, writes it, reloads all trips, and updates matching `activeSavedTrip`.
 
 ## Verified external-provider request inventory
 
@@ -281,7 +278,7 @@ flowchart TD
 | `buildGoogleRoute` — `app/services/googleRoutes.js`                                       | `google:routes`              | Google Routes v2 `computeRoutes` POST                           | `routeRequestCache` in caller                        |
 | Google `fetchPoisForRoutePointAndType` — `app/services/poiProviders/googlePoiProvider.js` | `google:places-nearby`       | Places v1 Nearby Search POST                                    | Whole batch cached by `poiRequestCache`              |
 | TomTom `fetchPoisForRoutePointAndType` — `app/services/poiProviders/tomtomPoiProvider.js` | `tomtom:poi-search`          | TomTom POI Search GET                                           | Whole batch cached by `poiRequestCache`              |
-| `fetchPredictions` — `app/components/AutoCompleteInput.jsx`                               | `google:places-autocomplete` | Places Autocomplete (New) POST                                  | None; 300 ms debounce, abort, and stale-result guard |
+| `fetchPredictions` — `app/components/AutoCompleteInput.jsx`                               | `google:places-autocomplete` | Places Autocomplete (New) POST                                  | None; 400 ms debounce, abort, and stale-result guard |
 | `fetchPlaceDetailsNew` — `app/services/googlePlacesAutocomplete.js`                       | `google:place-details`       | Place Details (New) GET                                         | None                                                 |
 | `fetchGooglePlaceDetailsForStop` — `app/services/googlePlaces.js`                         | `google:place-details`       | Places v1 details GET                                           | None                                                 |
 
@@ -384,13 +381,14 @@ Presentational components not individually expanded above (`CollapsibleSection`,
 | `attachRoutePositionToPois`                     | repeated `getClosestRoutePointInfo` -> segment/distance helpers                                                                                                                                  | Add route proximity/progress                                  |
 | `chooseDistributedStops`                        | private validation/progress helpers -> repeated `scorePoi` -> category/bucket/fill passes                                                                                                        | Rank/distribute top stops                                     |
 | `SuggestedStopsList.loadDetails`                | `fetchGooglePlaceDetailsForStop` -> `trackExternalRequest` -> `fetch`                                                                                                                            | Lazy rich place details                                       |
-| `AutocompleteInput.fetchPredictions`            | `fetchAutocompletePredictions` -> `trackExternalRequest` -> Places Autocomplete (New) POST                                                                                                       | Canadian predictions with optional route-midpoint bias        |
+| `AutocompleteInput.fetchPredictions`            | concurrent `fetchAutocompletePredictions` and `fetchRouteTextSearchPredictions` -> merge/dedupe                                                                                                  | Route-aware custom results plus Canadian fallback predictions |
 | `AutocompleteInput.handleSelect`                | `getPredictionName` -> optional `fetchPlaceDetailsNew` -> parent `onSelectLocation`                                                                                                              | Resolve the chosen prediction with the matching session token |
 | `AddCustomStopCard.handleAddCustomStop`         | `isValidCoords` -> private `getNameAndAddressFromDescription` -> Route `handleAddCustomStop` callback                                                                                            | Construct custom stop                                         |
-| `Route.handleAddCustomStop`                     | `getCustomStopCount` -> `attachRoutePositionToPois` -> `setSelectedStops`                                                                                                                        | Attach/append custom stop                                     |
+| `Route.handleAddCustomStop`                     | `getCustomStopCount` -> `prepareStopsForRouteHandoff` -> `setSelectedStops`                                                                                                                      | Validate/attach custom stop                                   |
 | `Route.toggleSelectedStop`                      | `getStopId` -> `setSelectedStops` functional callback                                                                                                                                            | Add/remove a selected stop                                    |
-| `Route.handleBuildFinalRoute`                   | `sortStopsByRouteProgress` -> repeated `getStopCoords` -> `buildRoute` -> polyline decode                                                                                                        | Build waypoint route                                          |
-| `Route.handleSaveTrip`                          | `sortStopsByRouteProgress` -> `addTrip` or `updateTrip`                                                                                                                                          | Persist final trip                                            |
+| `prepareStopsForRouteHandoff`                   | `getStopCoords` -> repeated `getClosestRoutePointInfo` -> stable progress sort                                                                                                                   | Shared display/save/handoff order                             |
+| `Route.handleOpenInGoogleMaps`                  | `prepareStopsForRouteHandoff` -> `buildGoogleMapsDirectionsUrl` -> `Linking.openURL`                                                                                                             | Local ordered waypoint handoff                                |
+| `Route.handleSaveTrip`                          | `prepareStopsForRouteHandoff` -> `addTrip` or `updateTrip`                                                                                                                                       | Persist original route and ordered stops                      |
 | `useSavedTripsStore.addTrip`                    | service `saveTrip` -> service `loadSavedTrips` -> Zustand `set`                                                                                                                                  | Add and refresh saved list                                    |
 | service `saveTrip`                              | `enqueue` -> `validatePayload` -> `readEnvelope` -> `normalizeStoredTrips` -> `writeEnvelope`                                                                                                    | Serialized local save                                         |
 | `SavedTrips.handleOpenSavedTrip`                | `setActiveSavedTrip` -> `router.push`                                                                                                                                                            | Start reopen navigation                                       |
@@ -455,13 +453,13 @@ Use source-map-aware breakpoints in the Expo/React Native debugger. Conditional 
 5. Each provider's `fetchPoisForRoutePointAndType` — request payload/URL and normalized return.
 6. `attachRoutePositionToPois` in `app/utils/routeDistance.js` and `chooseDistributedStops` in `app/utils/poiScoring.js` — compare fetched, nearby, and selected counts.
 
-### Select/final route
+### Select/handoff
 
 1. `toggleSelectedStop` in `app/(screens)/route.jsx` — inspect `stopId` and `currentStops`.
-2. `handleBuildFinalRoute` — before sorting, after `waypointCoords`, and after `await buildRoute`.
-3. `createRouteRequestKey` in `app/utils/requestKeys.js` — confirm waypoint order in the key.
-4. `buildGoogleRoute` — inspect `body.intermediates`.
-5. `setFinalRouteData` call — inspect encoded/decoded route and selected stop snapshot.
+2. `prepareStopsForRouteHandoff` in `app/utils/routeHandoff.js` — inspect recalculated progress, invalid stops, and stable ordering.
+3. `orderedSelectedStops` in Route — confirm displayed numbering matches prepared order.
+4. `handleOpenInGoogleMaps` — inspect the prepared stop list and final encoded URL.
+5. Search Route for `buildRoute(` — confirm only the initial preview request remains.
 
 ### Custom stop
 

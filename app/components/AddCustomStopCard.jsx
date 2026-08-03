@@ -4,14 +4,19 @@ import { Text, View } from "react-native";
 import AutocompleteInput from "./AutoCompleteInput";
 import WNButton from "./WNButton";
 import { isValidCoords } from "../utils/coordinates";
+import { getClosestRoutePointInfo } from "../utils/routeDistance";
+import { getDistanceOffRouteText } from "../utils/stopUtils";
 
 export default function AddCustomStopCard({
   onAddStop = () => {},
   locationBias,
+  customSearchPoints = [],
+  routeCoords = [],
 }) {
   const [customStopAddress, setCustomStopAddress] = useState("");
   const [customStopCoords, setCustomStopCoords] = useState(null);
   const [customStopMetadata, setCustomStopMetadata] = useState(null);
+  const [customStopRouteInfo, setCustomStopRouteInfo] = useState(null);
   const [error, setError] = useState(null);
 
   function getNameAndAddressFromDescription(description) {
@@ -58,11 +63,21 @@ export default function AddCustomStopCard({
       source: "custom",
       placeId: customStopMetadata?.placeId,
       googlePlaceId: customStopMetadata?.placeId,
+      ...(customStopRouteInfo
+        ? {
+            closestRouteDistanceMeters:
+              customStopRouteInfo.closestDistanceMeters,
+            closestRouteIndex: customStopRouteInfo.closestIndex,
+            routeProgress: customStopRouteInfo.routeProgress,
+            routeProgressPercent: customStopRouteInfo.routeProgressPercent,
+          }
+        : {}),
     });
 
     setCustomStopAddress("");
     setCustomStopCoords(null);
     setCustomStopMetadata(null);
+    setCustomStopRouteInfo(null);
     setError(null);
   }
 
@@ -88,22 +103,39 @@ export default function AddCustomStopCard({
           locationBias={locationBias}
           strictBounds={false}
           dropdownMode="inline"
+          customSearchPoints={customSearchPoints}
+          routeCoords={routeCoords}
           onChangeText={(text) => {
             setCustomStopAddress(text);
             setCustomStopCoords(null);
             setCustomStopMetadata(null);
+            setCustomStopRouteInfo(null);
             setError(null);
           }}
           onSelectLocation={(address, coords, metadata) => {
             setCustomStopAddress(address);
             setCustomStopCoords(coords);
             setCustomStopMetadata(metadata || null);
+            setCustomStopRouteInfo(
+              isValidCoords(coords)
+                ? getClosestRoutePointInfo(coords, routeCoords)
+                : null,
+            );
             setError(null);
           }}
         />
       </View>
 
       {error && <Text className="mt-2 text-sm text-red-600">{error}</Text>}
+
+      {customStopRouteInfo && (
+        <Text className="mt-2 text-sm font-medium text-emerald-950">
+          {getDistanceOffRouteText({
+            closestRouteDistanceMeters:
+              customStopRouteInfo.closestDistanceMeters,
+          })}
+        </Text>
+      )}
 
       <View className="mt-2">
         <WNButton

@@ -88,6 +88,7 @@ export async function requestExternalApi({
   signal,
   timeoutMs = API_LIMITS.requestTimeoutMs,
   retryTransient = true,
+  onNonOkResponse,
 }) {
   const maximumAttempts = retryTransient ? 2 : 1;
 
@@ -98,6 +99,8 @@ export async function requestExternalApi({
       );
 
       if (response.ok) return response;
+
+      await onNonOkResponse?.(response, { attempt });
 
       if (
         attempt < maximumAttempts &&

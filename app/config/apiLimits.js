@@ -9,6 +9,8 @@ export const API_LIMITS = Object.freeze({
   placeDetailsCacheTtlMs: 30 * 60 * 1000,
   autocompleteCacheMaxEntries: 40,
   autocompleteCacheTtlMs: 2 * 60 * 1000,
+  customRouteTextSearchCacheMaxEntries: 20,
+  customRouteTextSearchCacheTtlMs: 2 * 60 * 1000,
   autocompleteDebounceMs: 400,
   autocompleteMinimumLength: 3,
   exploreFirstWaveSize: 5,

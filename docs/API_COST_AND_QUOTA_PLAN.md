@@ -34,16 +34,16 @@ automatically.
 | Navigate displayed route     |                                              1 Route |                                                                        1 preview Route |
 | Explore candidate evaluation |                                      up to 25 Routes |      5-call first wave; second wave only if needed; 10 default Routes absolute maximum |
 | Explore displayed route      |                                   1 additional Route |                                         0 when the selected candidate preview is valid |
-| Final route with waypoints   |                                              1 Route |                                                                        1 default Route |
+| Final route with waypoints   |                                              1 Route |                              0; locally ordered handoff to Google Maps instead |
 | POI search, Google only      |                                up to 15 Nearby calls |                                      10 first-wave calls plus at most 3 fallback calls |
 | POI search, Google + TomTom  |                                       up to 30 calls |                                      20 first-wave calls plus at most 6 fallback calls |
-| Custom/normal autocomplete   |      one request per 300 ms at 2+ chars plus Details | one request per 400 ms at 3+ chars, bounded duplicate cache, plus one matching Details |
+| Normal/custom autocomplete   |      one request per 300 ms at 2+ chars plus Details | normal: one Autocomplete; custom: one Autocomplete plus up to 5 route Text Searches per settled 400 ms query, with bounded caches |
 | Rich stop details reopen     | one Details request and up to 5 photo URLs each time |                                     one cached Details request and at most 1 photo URL |
 
 One Navigate route build with automatic stops therefore has a cold-cache
 maximum of 14 calls with Google only (1 Route + 13 Nearby) or 27 with both POI
-providers (1 Route + 26 POI calls). A subsequent final route rebuild adds one
-Route call.
+providers (1 Route + 26 POI calls). Selected stops are ordered locally and
+handed to Google Maps, so there is no subsequent final Route call.
 
 One worst-case Explore build has 10 candidate Route calls plus up to 13 Google
 Nearby calls, or 26 combined Google/TomTom POI calls. The accepted candidate is

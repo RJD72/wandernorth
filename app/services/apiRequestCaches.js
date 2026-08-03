@@ -20,10 +20,15 @@ export const autocompleteRequestCache = createRequestCache({
   maxEntries: API_LIMITS.autocompleteCacheMaxEntries,
   ttlMs: API_LIMITS.autocompleteCacheTtlMs,
 });
+export const customRouteTextSearchRequestCache = createRequestCache({
+  maxEntries: API_LIMITS.customRouteTextSearchCacheMaxEntries,
+  ttlMs: API_LIMITS.customRouteTextSearchCacheTtlMs,
+});
 export function clearApiRequestCaches() {
   routeRequestCache.clear();
   poiRequestCache.clear();
   geocodeRequestCache.clear();
   placeDetailsRequestCache.clear();
   autocompleteRequestCache.clear();
+  customRouteTextSearchRequestCache.clear();
 }
