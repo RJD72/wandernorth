@@ -20,21 +20,17 @@ export default function Footer() {
           <a href="#faq">FAQ</a>
           <a href="#waitlist">Early Access</a>
         </nav>
-        <nav aria-label="Legal placeholders">
-          <a href="#legal-note">
-            Privacy <span>(coming soon)</span>
-          </a>
+        <nav aria-label="Legal and contact navigation">
+          <a href="/privacy-policy">Privacy</a>
           <a href="#legal-note">
             Terms <span>(coming soon)</span>
           </a>
-          <a href="mailto:hello@example.com">
-            Contact <span>(replace email)</span>
-          </a>
+          <a href="mailto:rob@websmithcreations.ca">Contact</a>
         </nav>
       </div>
       <div className="shell footer-bottom" id="legal-note">
         <span>© {new Date().getFullYear()} Wander North.</span>
-        <span>Legal pages are placeholders pending review.</span>
+        <span>Terms are pending review.</span>
       </div>
     </footer>
   );
