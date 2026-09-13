@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Leave real files and directories (including /api) alone.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Let the Vite app handle client-side routes such as /privacy-policy.
+RewriteRule ^ index.html [L]
