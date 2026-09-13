@@ -38,8 +38,11 @@ module.exports = {
 
     ios: {
       // Allows optimized iPad/tablet support in addition to iPhone layouts.
-      supportsTablet: true,
+      bundleIdentifier: "com.rob.wandernorth",
+      buildNumber: "1",
+      supportsTablet: false,
       infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
         NSLocationWhenInUseUsageDescription:
           "Wander North uses your location only when you choose Current Location to plan a route.",
       },
